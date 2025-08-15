@@ -5,16 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Spot the Difference – Creator</title>
   <style>
-    :root {
-      --bg:#0f1220; --panel:#171a2b; --ink:#e9ecf1; --muted:#a7b0c0; --accent:#7bd4ff;
-      --good:#53d769; --bad:#ff5c5c; --frame:#2a2f4a;
-    }
+    :root { --bg:#0f1220; --panel:#171a2b; --ink:#e9ecf1; --muted:#a7b0c0; --accent:#7bd4ff; --good:#53d769; --bad:#ff5c5c; --frame:#2a2f4a; }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;background:linear-gradient(180deg,#0f1220,#0b0e1a);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
     header{padding:16px 20px;border-bottom:1px solid #23263d;display:flex;align-items:center;gap:14px}
     h1{margin:0;font-size:18px;letter-spacing:.3px}
-    main{display:grid;grid-template-columns:320px 1fr;min-height:calc(100% - 58px)}
+    main{display:grid;grid-template-columns:360px 1fr;min-height:calc(100% - 58px)}
     aside{padding:16px;border-right:1px solid #23263d;background:var(--panel)}
     .section{margin-bottom:16px}
     label{display:block;margin:10px 0 6px;color:var(--muted)}
@@ -24,17 +21,19 @@
     button.primary{background:var(--accent);border-color:#66c9fb;color:#001019;font-weight:600}
     button:disabled{opacity:.45;cursor:not-allowed}
     .row{display:flex;gap:10px}
+    .row > *{flex:1}
     .hint{color:var(--muted);font-size:12px;margin-top:6px}
     .canvas-wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
     .frame{position:relative;background:#0a0d1b;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3;}
     canvas{width:100%;height:100%;display:block}
     .badge{position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
-    .point{position:absolute;width:10px;height:10px;border:2px solid var(--accent);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 0 2px #0008}
-    .radius{position:absolute;border:1px dashed #7bd4ff55;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
     .toolbar{display:flex;gap:8px;margin-top:10px}
     .list{max-height:180px;overflow:auto;border:1px dashed #2b3152;border-radius:10px;padding:10px}
     code.k{background:#0c1022;color:#dfe7ff;padding:2px 6px;border-radius:6px}
+    .pill{display:inline-block;background:#0e1327;border:1px solid #2b3152;border-radius:999px;padding:4px 8px;color:var(--muted);font-variant-numeric:tabular-nums}
+    .radiusGuide{position:absolute;border:1.5px dashed #7bd4ffcc;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
+    .pointDot{position:absolute;width:8px;height:8px;background:#7bd4ff;border:2px solid #000;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
   </style>
 </head>
 <body>
@@ -50,23 +49,37 @@
         <input id="origFile" type="file" accept="image/*" />
         <div class="hint">Both images should be the same dimensions.</div>
       </div>
-      <div class="section row">
-        <div style="flex:1">
-          <label>Click Radius (px)</label>
-          <input id="radius" type="number" min="5" max="200" step="1" value="24" />
-        </div>
-        <div style="flex:1">
-          <label>Points Needed</label>
-          <input id="need" type="number" min="1" max="20" value="10" />
-        </div>
-      </div>
+
       <div class="section">
-        <div class="toolbar">
-          <button id="clearPoints">Clear points</button>
-          <button id="undoPoint">Undo</button>
+        <label>Click Radius</label>
+        <div class="row">
+          <div>
+            <small class="hint">Pixels @ natural image</small>
+            <input id="radiusPx" type="number" min="1" step="1" value="24" />
+          </div>
+          <div>
+            <small class="hint">Percent of min side</small>
+            <input id="radiusPct" type="number" min="0.1" max="60" step="0.1" value="2.0" />
+          </div>
         </div>
-        <div class="hint">Click on the <b>left</b> image to add points. They mirror to the right image automatically.</div>
+        <div class="hint">These are <b>linked</b>. Change either. Export will store a <code class="k">radiusNorm</code> that exactly matches the Player.</div>
+        <div class="pill" id="radiusSummary">—</div>
       </div>
+
+      <div class="section row">
+        <div>
+          <label>Points Needed</label>
+          <input id="need" type="number" min="1" max="30" value="10" />
+        </div>
+        <div>
+          <label>Tools</label>
+          <div class="toolbar">
+            <button id="clearPoints">Clear</button>
+            <button id="undoPoint">Undo</button>
+          </div>
+        </div>
+      </div>
+
       <div class="section">
         <label>Export / Import Config</label>
         <div class="toolbar">
@@ -77,30 +90,37 @@
         <div class="list" id="pointList"></div>
       </div>
       <div class="section">
-        <div class="hint">Export includes normalized positions, radius, and natural size. Use with <code class="k">player.html</code>.</div>
+        <div class="hint">Export includes normalized positions, <b>normalized radius</b>, and natural size. Player uses the same math for hit & reveal.</div>
       </div>
     </aside>
+
     <div class="canvas-wrap">
       <div class="card">
-        <div class="frame">
+        <div class="frame" id="modFrame">
           <span class="badge">Modified (click to add)</span>
           <canvas id="modCanvas"></canvas>
         </div>
       </div>
       <div class="card">
-        <div class="frame">
+        <div class="frame" id="origFrame">
           <span class="badge">Original (preview)</span>
           <canvas id="origCanvas"></canvas>
         </div>
       </div>
     </div>
   </main>
+
   <script>
+    // DOM
     const modFile = document.getElementById('modFile');
     const origFile = document.getElementById('origFile');
     const modCanvas = document.getElementById('modCanvas');
     const origCanvas = document.getElementById('origCanvas');
-    const radiusInput = document.getElementById('radius');
+    const modFrame = document.getElementById('modFrame');
+    const origFrame = document.getElementById('origFrame');
+    const radiusPxInput = document.getElementById('radiusPx');
+    const radiusPctInput = document.getElementById('radiusPct');
+    const radiusSummary = document.getElementById('radiusSummary');
     const needInput = document.getElementById('need');
     const list = document.getElementById('pointList');
     const exportBtn = document.getElementById('exportBtn');
@@ -109,61 +129,103 @@
     const clearBtn = document.getElementById('clearPoints');
     const undoBtn = document.getElementById('undoPoint');
 
+    // State
     let modImg = new Image();
     let origImg = new Image();
     let naturalW = 0, naturalH = 0;
     let points = []; // {xNorm, yNorm}
 
+    function dpr(){ return Math.max(1, window.devicePixelRatio || 1); }
+
     function fitCanvasSize() {
-      const ratio = naturalW && naturalH ? naturalW/naturalH : 4/3;
+      const ratio = naturalW && naturalH ? naturalW / naturalH : 4/3;
       const wrapW = modCanvas.parentElement.clientWidth;
-      modCanvas.width = wrapW; modCanvas.height = wrapW/ratio;
-      origCanvas.width = wrapW; origCanvas.height = wrapW/ratio;
+      const cssW = wrapW;
+      const cssH = wrapW / ratio;
+      for (const c of [modCanvas, origCanvas]){
+        c.style.width = cssW + 'px';
+        c.style.height = cssH + 'px';
+        c.width  = Math.round(cssW * dpr());
+        c.height = Math.round(cssH * dpr());
+        const ctx = c.getContext('2d');
+        ctx.setTransform(dpr(),0,0,dpr(),0,0); // use CSS pixels for drawing
+      }
       draw();
     }
 
-    function draw() {
+    function normFromPx(px){ return (!naturalW?0: (px / Math.min(naturalW, naturalH))); }
+    function pxFromNorm(rn){ return rn * Math.min(naturalW, naturalH); }
+
+    function getRadiusNorm(){
+      // compute from px input (single source of truth), sync % input
+      const px = Math.max(0, +radiusPxInput.value || 0);
+      return normFromPx(px);
+    }
+
+    function syncRadiusUI(from){
+      if (!naturalW) return;
+      if (from === 'pct'){
+        const pct = Math.max(0, +radiusPctInput.value || 0);
+        radiusPxInput.value = Math.round( (pct/100) * Math.min(naturalW, naturalH) );
+      } else {
+        const px = Math.max(0, +radiusPxInput.value || 0);
+        radiusPctInput.value = ((px / Math.min(naturalW, naturalH)) * 100).toFixed(2);
+      }
+      updateRadiusSummary();
+      draw();
+    }
+
+    function updateRadiusSummary(){
+      if (!naturalW){ radiusSummary.textContent = 'Load images to set radius.'; return; }
+      const px = +radiusPxInput.value || 0;
+      const pct = +radiusPctInput.value || 0;
+      // Also compute how big that looks on the current preview
+      const sCss = Math.min(modCanvas.clientWidth, modCanvas.clientHeight);
+      const rCss = (pct/100) * sCss;
+      radiusSummary.textContent = `Radius = ${px}px @ natural  •  ≈ ${pct.toFixed(2)}% of min side  •  ≈ ${Math.round(rCss)}px on this preview`;
+    }
+
+    function getPreviewRadiusPx(){
+      // radius to draw on these canvases (CSS px)
+      const pct = (+radiusPctInput.value || 0) / 100;
+      const sCss = Math.min(modCanvas.clientWidth, modCanvas.clientHeight);
+      return pct * sCss;
+    }
+
+    function draw(){
       const mctx = modCanvas.getContext('2d');
       const octx = origCanvas.getContext('2d');
-      mctx.clearRect(0,0,modCanvas.width,modCanvas.height);
-      octx.clearRect(0,0,origCanvas.width,origCanvas.height);
-      if (modImg.complete && naturalW) mctx.drawImage(modImg,0,0,modCanvas.width,modCanvas.height);
-      if (origImg.complete && naturalW) octx.drawImage(origImg,0,0,origCanvas.width,origCanvas.height);
-      // points overlay on left only
-      const r = +radiusInput.value;
-      for (const p of points) {
-        const x = p.xNorm * modCanvas.width;
-        const y = p.yNorm * modCanvas.height;
-        drawPointOverlay(modCanvas, x, y, r);
-      }
+      const cssW = modCanvas.clientWidth, cssH = modCanvas.clientHeight;
+      mctx.clearRect(0,0,cssW,cssH); octx.clearRect(0,0,cssW,cssH);
+      if (modImg.complete && naturalW) mctx.drawImage(modImg,0,0,cssW,cssH);
+      if (origImg.complete && naturalW) octx.drawImage(origImg,0,0,cssW,cssH);
+
+      // Overlays: true-to-player radius using percent->CSS conversion
+      const rpx = getPreviewRadiusPx();
+      // Draw guides for each point on BOTH canvases, so you see consistency
+      for (const p of points){ drawGuide(modCanvas, p, rpx); drawGuide(origCanvas, p, rpx); }
       updateList();
       exportBtn.disabled = !(points.length === +needInput.value && naturalW);
     }
 
-    function drawPointOverlay(canvas, x, y, r) {
+    function drawGuide(canvas, p, r){
       const ctx = canvas.getContext('2d');
-      // radius guide
-      ctx.save();
-      ctx.strokeStyle = '#7bd4ff55';
-      ctx.setLineDash([6,6]);
-      ctx.beginPath();
-      ctx.arc(x,y,r,0,Math.PI*2);
-      ctx.stroke();
-      ctx.restore();
-      // center dot
-      ctx.save();
-      ctx.fillStyle = '#7bd4ff';
-      ctx.beginPath();
-      ctx.arc(x,y,4,0,Math.PI*2);
-      ctx.fill();
-      ctx.restore();
+      const x = p.xNorm * canvas.clientWidth;
+      const y = p.yNorm * canvas.clientHeight;
+      // dashed circle
+      ctx.save(); ctx.strokeStyle = '#7bd4ffcc'; ctx.setLineDash([8,6]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke(); ctx.restore();
+      // center dot (for placement reference only)
+      ctx.save(); ctx.fillStyle = '#7bd4ff'; ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill(); ctx.restore();
     }
 
-    function readImage(file, imgEl, onload) {
-      const reader = new FileReader();
-      reader.onload = () => { imgEl.src = reader.result; };
-      reader.readAsDataURL(file);
-      imgEl.onload = () => { if (!naturalW){ naturalW = imgEl.naturalWidth; naturalH = imgEl.naturalHeight; fitCanvasSize(); } draw(); if (onload) onload(); };
+    function readImage(file, imgEl, onload){
+      const reader = new FileReader(); reader.onload = ()=>{ imgEl.src = reader.result; }; reader.readAsDataURL(file);
+      imgEl.onload = ()=>{ if (!naturalW){ naturalW = imgEl.naturalWidth; naturalH = imgEl.naturalHeight; fitCanvasSize(); }
+        // clamp px input to sensible max based on new image
+        const maxPx = Math.floor(Math.min(naturalW, naturalH) * 0.6); // up to 60%
+        radiusPxInput.max = String(maxPx);
+        syncRadiusUI('px');
+        if (onload) onload(); draw(); };
     }
 
     function canvasToNorm(ev, canvas){
@@ -174,11 +236,8 @@
     }
 
     modCanvas.addEventListener('click', (ev)=>{
-      if (!naturalW) return;
-      if (points.length >= +needInput.value) return;
-      const p = canvasToNorm(ev, modCanvas);
-      points.push(p);
-      draw();
+      if (!naturalW) return; if (points.length >= +needInput.value) return;
+      const p = canvasToNorm(ev, modCanvas); points.push(p); draw();
     });
 
     clearBtn.onclick = ()=>{ points = []; draw(); };
@@ -187,41 +246,35 @@
     modFile.onchange = (e)=>{ if (e.target.files[0]) readImage(e.target.files[0], modImg, ()=>{}); };
     origFile.onchange = (e)=>{ if (e.target.files[0]) readImage(e.target.files[0], origImg, ()=>{}); };
     window.addEventListener('resize', fitCanvasSize);
-    radiusInput.addEventListener('input', draw);
+
+    radiusPxInput.addEventListener('input', ()=> syncRadiusUI('px'));
+    radiusPctInput.addEventListener('input', ()=> syncRadiusUI('pct'));
     needInput.addEventListener('input', draw);
 
-    function updateList(){
-      list.innerHTML = points.map((p,i)=>`#${i+1}: x=${(p.xNorm*100).toFixed(2)}% , y=${(p.yNorm*100).toFixed(2)}%`).join('<br/>');
-    }
+    function updateList(){ list.innerHTML = points.map((p,i)=>`#${i+1}: x=${(p.xNorm*100).toFixed(2)}% , y=${(p.yNorm*100).toFixed(2)}%`).join('<br/>'); }
 
     exportBtn.onclick = ()=>{
-      const cfg = {
-        version:1,
-        natural:{w:naturalW,h:naturalH},
-        radius:+radiusInput.value,
-        points:points,
-        need:+needInput.value
-      };
+      const radiusNorm = getRadiusNorm();
+      const cfg = { version:2, natural:{w:naturalW,h:naturalH}, radiusNorm, points, need:+needInput.value };
       const blob = new Blob([JSON.stringify(cfg,null,2)], {type:'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'spot-config.json';
-      document.body.appendChild(a); a.click(); a.remove();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'spot-config.json'; document.body.appendChild(a); a.click(); a.remove();
     };
 
     importBtn.onclick = ()=> importFile.click();
     importFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return;
-      const r = new FileReader();
-      r.onload = ()=>{
-        try{
-          const cfg = JSON.parse(r.result);
-          if (!cfg.points || !cfg.radius) throw new Error('Invalid config');
-          points = cfg.points; radiusInput.value = cfg.radius; needInput.value = cfg.need || cfg.points.length;
-          if (cfg.natural && cfg.natural.w) { naturalW = cfg.natural.w; naturalH = cfg.natural.h; fitCanvasSize(); }
-          draw();
-        }catch(err){ alert('Could not import JSON: '+err.message); }
-      };
+      const f = e.target.files[0]; if (!f) return; const r = new FileReader();
+      r.onload = ()=>{ try{
+        const cfg = JSON.parse(r.result); if (!cfg.points) throw new Error('Invalid config');
+        points = cfg.points; needInput.value = cfg.need || cfg.points.length;
+        let rNorm = cfg.radiusNorm;
+        if (rNorm == null && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){ rNorm = cfg.radius / Math.min(cfg.natural.w, cfg.natural.h); }
+        if (!rNorm) rNorm = 0.02; // default 2%
+        // Sync both inputs from normalized radius
+        radiusPxInput.value = Math.round(pxFromNorm(rNorm));
+        radiusPctInput.value = (rNorm*100).toFixed(2);
+        if (cfg.natural && cfg.natural.w){ naturalW = cfg.natural.w; naturalH = cfg.natural.h; }
+        fitCanvasSize(); draw();
+      }catch(err){ alert('Could not import JSON: '+err.message); } };
       r.readAsText(f);
     };
   </script>
