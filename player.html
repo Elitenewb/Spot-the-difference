@@ -12,30 +12,35 @@
     header{padding:16px 20px;border-bottom:1px solid #23263d;display:flex;align-items:center;justify-content:space-between}
     h1{margin:0;font-size:18px}
     main{display:grid;grid-template-columns:320px 1fr;min-height:calc(100% - 58px)}
+    body.playing main{grid-template-columns:1fr}
     aside{padding:16px;border-right:1px solid #23263d;background:var(--panel)}
+    body.playing aside{display:none}
     .section{margin-bottom:16px}
     label{display:block;margin:8px 0 6px;color:var(--muted)}
     input[type="file"],button{width:100%;padding:10px;border:1px solid #2b3152;border-radius:10px;background:#0e1122;color:var(--ink)}
     button{cursor:pointer}
     button.primary{background:var(--accent);border-color:#66c9fb;color:#001019;font-weight:600}
     .row{display:flex;gap:10px}
-    .stat{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
     .game{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
     .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3;background:#0a0d1b}
-    canvas{width:100%;height:100%;display:block}
-    .badge{position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
+    canvas{width:100%;height:100%;display:block;background:transparent;}
+    #revealCanvas{position:absolute;inset:0;pointer-events:none;filter:none;}
+    .badge{position:absolute;top:8px;left:8px;background:#000c;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
+    body.playing .badge{display:none}
     .bar{height:8px;background:#10142b;border:1px solid #2b3152;border-radius:999px;overflow:hidden}
     .fill{height:100%;background:linear-gradient(90deg,#66c9fb,#7bd4ff)}
     .stats{display:flex;gap:10px;flex-wrap:wrap}
     .chip{background:#0e1327;border:1px solid #2b3152;border-radius:999px;padding:6px 10px;color:var(--muted)}
-    .center-bottom{position:absolute;left:50%;transform:translateX(-50%);bottom:8px;background:#0008;padding:4px 10px;border-radius:10px;border:1px solid #ffffff22}
     .hintPulse{position:absolute;border:2px solid #fff;border-radius:50%;opacity:0;pointer-events:none}
     .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center}
     .modal .inner{background:#0f142e;border:1px solid #2b3152;border-radius:16px;max-width:420px;width:92%;padding:20px}
     .modal h2{margin:0 0 12px}
     .modal .row{display:flex;justify-content:space-between;margin-top:10px}
-    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0c1022;color:#dfe7ff;padding:2px 6px;border-radius:6px}
+    .hud{display:none;gap:12px;align-items:center;justify-content:center;padding:10px 18px;border-top:1px solid #23263d}
+    body.playing .hud{display:flex}
+    .hud .btn{padding:10px 14px;border-radius:10px;border:1px solid #2b3152;background:#0e1122;color:var(--ink);cursor:pointer}
+    .hud .timer{font-variant-numeric:tabular-nums;background:#0e1327;border:1px solid #2b3152;border-radius:10px;padding:8px 12px;color:var(--muted)}
   </style>
 </head>
 <body>
@@ -58,28 +63,20 @@
         <input id="cfgFile" type="file" accept="application/json" />
       </div>
       <div class="section row">
-        <button id="hintBtn">Hint</button>
+        <button id="startBtn" class="primary">Start game</button>
         <button id="resetBtn">Reset game</button>
       </div>
       <div class="section">
-        <label>Custom cursor (PNG, optional)</label>
-        <input id="cursorFile" type="file" accept="image/png" />
-        <div class="section">
-          <button id="fitBtn">Fit to natural size</button>
-        </div>
-        <div class="section">
-          <div class="bar"><div id="bonusFill" class="fill" style="width:100%"></div></div>
-          <div class="hint" style="color:var(--muted);margin-top:6px">Bonus counts down from 1000 → 0 over 20s. Each found difference = <b>200</b> + current bonus. Wrong click: <span style="color:var(--bad)">-25</span>.</div>
-        </div>
+        <div class="bar"><div id="bonusFill" class="fill" style="width:100%"></div></div>
+        <div class="hint" style="color:var(--muted);margin-top:6px">Bonus counts down from 1000 → 0 over 20s. Each found difference = <b>200</b> + current bonus. Wrong click: <span style="color:var(--bad)">-25</span>.</div>
       </div>
     </aside>
     <div class="game">
       <div class="card">
         <div class="frame" id="leftFrame">
           <span class="badge">Modified (clickable)</span>
-          <canvas id="baseCanvas" title="Click to reveal"></canvas>
-          <canvas id="revealCanvas" style="position:absolute;inset:0"></canvas>
-          <div id="upTimer" class="center-bottom">00:00</div>
+          <canvas id="baseCanvas"></canvas>
+          <canvas id="revealCanvas"></canvas>
         </div>
       </div>
       <div class="card">
@@ -90,6 +87,12 @@
       </div>
     </div>
   </main>
+
+  <!-- Bottom HUD shown during play -->
+  <div class="hud" id="hud">
+    <button id="hintBtn" class="btn">Hint</button>
+    <div id="upTimer" class="timer">00:00</div>
+  </div>
 
   <div id="doneModal" class="modal">
     <div class="inner">
@@ -108,13 +111,12 @@
     const modFile = document.getElementById('modFile');
     const origFile = document.getElementById('origFile');
     const cfgFile = document.getElementById('cfgFile');
-    const cursorFile = document.getElementById('cursorFile');
-    const fitBtn = document.getElementById('fitBtn');
+    const startBtn = document.getElementById('startBtn');
     const hintBtn = document.getElementById('hintBtn');
     const resetBtn = document.getElementById('resetBtn');
 
-    const baseCanvas = document.getElementById('baseCanvas'); // shows modified image
-    const revealCanvas = document.getElementById('revealCanvas'); // drawn with original patches
+    const baseCanvas = document.getElementById('baseCanvas');
+    const revealCanvas = document.getElementById('revealCanvas');
     const origCanvas = document.getElementById('origCanvas');
     const leftFrame = document.getElementById('leftFrame');
 
@@ -132,7 +134,7 @@
     // State
     let modImg = new Image();
     let origImg = new Image();
-    let cfg = null; // {radius, points[{xNorm,yNorm}], need, natural{w,h}}
+    let cfg = null; // {radiusNorm?, radius?, points[{xNorm,yNorm}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
 
@@ -142,6 +144,8 @@
     let bonusStart = 0; // ms timestamp for current 20s window
     const BONUS_WINDOW = 20000; // 20s
     const BONUS_MAX = 1000;
+
+    function imagesReady(){ return modImg.naturalWidth && origImg.naturalWidth; }
 
     // Canvas helpers
     function drawImages() {
@@ -154,31 +158,22 @@
       bctx.clearRect(0,0,bw,bh); octx.clearRect(0,0,bw,bh);
       if (modImg.complete && modImg.naturalWidth) bctx.drawImage(modImg,0,0,bw,bh);
       if (origImg.complete && origImg.naturalWidth) octx.drawImage(origImg,0,0,bw,bh);
-      // keep any existing reveal pixels (redraw from scratch by replaying found)
       const rctx = revealCanvas.getContext('2d');
       rctx.clearRect(0,0,bw,bh);
       for (const idx of found) {
         const p = cfg.points[idx];
         const x = p.xNorm * bw, y = p.yNorm * bh;
-        revealPatch(x,y,cfg.radius,1,false); // instantly draw existing reveals
+        revealPatch(x,y,getRadiusPx(),1,false);
       }
     }
 
-    function fitToNatural() {
-      if (!cfg || !cfg.natural) return;
-      // maintain frame aspect ratio via CSS; canvas resizes to parent automatically by JS above
-      drawImages();
-    }
-
     function startTimers(){
-      // Up timer
       upStart = performance.now();
       if (upTimerId) cancelAnimationFrame(upTimerId);
       const tick = ()=>{
         const ms = performance.now() - upStart;
         const s = Math.floor(ms/1000), m = Math.floor(s/60), r = s%60;
         upTimerEl.textContent = `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
-        // Bonus
         const bms = Math.max(0, BONUS_WINDOW - (performance.now() - bonusStart));
         const b = Math.round((bms/ BONUS_WINDOW) * BONUS_MAX);
         bonusEl.textContent = b;
@@ -200,16 +195,24 @@
 
     function distance(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return Math.hypot(dx,dy); }
 
+    function getRadiusPx(){
+      const s = Math.min(baseCanvas.width, baseCanvas.height);
+      if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
+      if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
+        return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s; // back-compat
+      }
+      return 24; // fallback
+    }
+
     function revealPatch(x, y, r, targetAlpha = 1, animate=true){
       const ctx = revealCanvas.getContext('2d');
       const bw = revealCanvas.width, bh = revealCanvas.height;
-      const radius = r;
-      // We'll draw original image through a circular clip to the reveal canvas.
       const drawCircle = (alpha)=>{
         ctx.save();
         ctx.globalAlpha = alpha;
-        ctx.beginPath(); ctx.arc(x,y,radius,0,Math.PI*2); ctx.closePath();
+        ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.closePath();
         ctx.clip();
+        ctx.globalCompositeOperation = 'source-over';
         ctx.drawImage(origImg,0,0,bw,bh);
         ctx.restore();
       };
@@ -231,12 +234,11 @@
     }
 
     function onClickCanvas(ev){
-      if (!cfg) return;
+      if (!cfg || !imagesReady()) return;
       const bw = baseCanvas.width, bh = baseCanvas.height;
       const n = normFromEvent(ev, baseCanvas);
       const x = n.x * bw, y = n.y * bh;
-      const r = cfg.radius;
-      // find first not-found point within radius
+      const r = getRadiusPx();
       let hitIndex = -1;
       cfg.points.forEach((p,idx)=>{
         if (hitIndex!==-1) return;
@@ -245,7 +247,6 @@
         if (distance(x,y,px,py) <= r) hitIndex = idx;
       });
       if (hitIndex === -1) { wrongClick(); return; }
-      // Correct hit
       found.add(hitIndex);
       const p = cfg.points[hitIndex];
       revealPatch(p.xNorm*bw, p.yNorm*bh, r, 1, true);
@@ -255,7 +256,6 @@
       foundEl.textContent = found.size;
       flashBorder(leftFrame,'good');
       resetBonus();
-      // Done?
       if (found.size >= (cfg.need || cfg.points.length)) finish();
     }
 
@@ -266,7 +266,6 @@
       doneModal.style.display = 'flex';
     }
 
-    // Hints: flash a 3x radius ring around a random unresolved point
     function doHint(){
       if (!cfg) return;
       const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i));
@@ -274,7 +273,7 @@
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
       const bw = baseCanvas.width, bh = baseCanvas.height;
       const p = cfg.points[idx];
-      const x = p.xNorm*bw, y = p.yNorm*bh; const R = cfg.radius*3;
+      const x = p.xNorm*bw, y = p.yNorm*bh; const R = getRadiusPx()*3;
       const ring = document.createElement('div');
       ring.className = 'hintPulse';
       ring.style.left = (x - R) + 'px';
@@ -304,25 +303,26 @@
           score = 0; scoreEl.textContent = score;
           found = new Set(); foundEl.textContent = 0;
           needEl.textContent = cfg.need || (cfg.points? cfg.points.length : 10);
-          startTimers(); drawImages();
+          drawImages();
         }catch(err){ alert('Invalid config JSON: '+err.message); }
       };
       r.readAsText(f);
     };
 
-    // Custom cursor PNG
-    cursorFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return;
-      const url = URL.createObjectURL(f);
-      // hotspot roughly center (16,16); adjust as needed
-      baseCanvas.style.cursor = `url(${url}) 16 16, crosshair`;
-    };
-
     // Interactions
     baseCanvas.addEventListener('click', onClickCanvas);
     hintBtn.onclick = doHint;
-    resetBtn.onclick = ()=>{ if(!cfg) return; score=0; scoreEl.textContent=0; found.clear(); foundEl.textContent=0; const rctx=revealCanvas.getContext('2d'); rctx.clearRect(0,0,revealCanvas.width,revealCanvas.height); startTimers(); drawImages(); };
-    fitBtn.onclick = fitToNatural;
+    resetBtn.onclick = ()=>{ if(!cfg) return; score=0; scoreEl.textContent=0; found.clear(); foundEl.textContent=0; const rctx=revealCanvas.getContext('2d'); rctx.clearRect(0,0,revealCanvas.width,revealCanvas.height); resetBonus(); startTimers(); drawImages(); };
+
+    // Start game: hide sidebar, badges, show HUD, start timers
+    startBtn.onclick = ()=>{
+      if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
+      document.body.classList.add('playing');
+      startTimers();
+      drawImages();
+    };
+
+    // Resize handling
     window.addEventListener('resize', drawImages);
 
     // Modal buttons
