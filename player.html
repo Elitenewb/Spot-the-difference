@@ -25,17 +25,12 @@
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
     .game{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
 
-    /* Frames match image aspect ratio at runtime */
     .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;background:#0a0d1b}
-
-    /* Left (play) side: stack one IMG and overlay circular patches (no canvas/SVG masks) */
     .stack{position:relative;width:100%;height:100%}
-    #modLeft{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill;filter:none;mix-blend-mode:normal;opacity:1}
-    #patchLayer{position:absolute;inset:0;pointer-events:none}
-    .patch{position:absolute;border-radius:50%;background-size:100% 100%;background-repeat:no-repeat;opacity:0;transition:opacity 180ms ease}
-    .patch.in{opacity:1}
+    .layer{position:absolute;inset:0;display:block;width:100%;height:100%}
+    #origCanvas{z-index:1}
+    #modCanvas{z-index:2}
 
-    /* Right (reference) */
     #origRight{width:100%;height:100%;object-fit:fill;display:block}
 
     .badge{position:absolute;top:8px;left:8px;background:#000c;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
@@ -99,8 +94,8 @@
         <div class="frame" id="leftFrame">
           <span class="badge">Modified (clickable)</span>
           <div class="stack" id="stack">
-            <img id="modLeft" alt="Modified" />
-            <div id="patchLayer"></div>
+            <canvas id="origCanvas" class="layer"></canvas>
+            <canvas id="modCanvas" class="layer"></canvas>
           </div>
         </div>
         <div class="under-left"><button id="hintBtnUnder" class="btn" type="button">Hint</button></div>
@@ -139,9 +134,10 @@
 
     const leftFrame = document.getElementById('leftFrame');
     const rightFrame = document.getElementById('rightFrame');
-    const stack = document.getElementById('stack');
-    const modLeft = document.getElementById('modLeft');
-    const patchLayer = document.getElementById('patchLayer');
+    const origCanvas = document.getElementById('origCanvas');
+    const modCanvas = document.getElementById('modCanvas');
+    const octx = origCanvas.getContext('2d');
+    const mctx = modCanvas.getContext('2d');
     const origRight = document.getElementById('origRight');
 
     const scoreEl = document.getElementById('score');
@@ -157,8 +153,9 @@
     const playAgain = document.getElementById('playAgain');
 
     // State
-    let modImg = null; // ImageBitmap for rendering consistency
-    let origImgUrl = '';
+    let modBmp = null; // ImageBitmap
+    let origBmp = null; // ImageBitmap
+    let origUrl = '';
     let cfg = null; // {radiusNorm, points[{xNorm,yNorm}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
@@ -172,30 +169,42 @@
     const BONUS_STEP_MS = 2000; // update every 2s
     const BONUS_STEP_VAL = BONUS_MAX / (BONUS_WINDOW / BONUS_STEP_MS); // 100 per step
 
-    // Click radius helpers
-    const HINT_FACTOR = 8; // much larger, per request
-    const HIT_FUDGE = 1.15; // widen hit circle slightly to match perception
+    // Geometry
+    const HINT_FACTOR = 8;     // large hint ring
+    const HIT_FUDGE   = 1.25;  // looser hit detection
 
-    function imagesReady(){ return !!(modImg && origImgUrl); }
+    function imagesReady(){ return !!(modBmp && origBmp); }
 
-    async function loadAsBitmap(file){
-      const blobUrl = URL.createObjectURL(file);
-      // Draw unaltered color; avoid browser color conversion on canvas
-      const bmp = await createImageBitmap(file, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }).catch(()=>null);
-      return { bmp, url: blobUrl };
+    async function loadBitmap(file){
+      const bmp = await createImageBitmap(file, { colorSpaceConversion:'none', premultiplyAlpha:'none' }).catch(()=>null);
+      const url = URL.createObjectURL(file);
+      return {bmp, url};
     }
 
-    function setAspectToNatural(){
-      const w = cfg?.natural?.w || modImg?.width || 4;
-      const h = cfg?.natural?.h || modImg?.height || 3;
-      leftFrame.style.aspectRatio = `${w} / ${h}`;
-      rightFrame.style.aspectRatio = `${w} / ${h}`;
+    function setAspect(){
+      const w = cfg?.natural?.w || modBmp?.width || 4;
+      const h = cfg?.natural?.h || modBmp?.height || 3;
+      leftFrame.style.aspectRatio = `${w}/${h}`;
+      rightFrame.style.aspectRatio = `${w}/${h}`;
     }
 
-    function rect(){ return stack.getBoundingClientRect(); }
+    function cssRect(){ return modCanvas.getBoundingClientRect(); }
+
+    function sizeCanvases(){
+      const r = cssRect();
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      for (const c of [origCanvas, modCanvas]){
+        c.width  = Math.max(1, Math.round(r.width * dpr));
+        c.height = Math.max(1, Math.round(r.height * dpr));
+      }
+      // draw using CSS pixels
+      octx.setTransform(dpr,0,0,dpr,0,0);
+      mctx.setTransform(dpr,0,0,dpr,0,0);
+    }
 
     function radiusPx(){
-      const r = rect(); const s = Math.min(r.width, r.height);
+      const r = cssRect();
+      const s = Math.min(r.width, r.height);
       if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
       if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
         return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s;
@@ -203,34 +212,72 @@
       return 24;
     }
 
-    function positionPatch(el, cx, cy, R){
-      el.style.left = (cx - R) + 'px';
-      el.style.top = (cy - R) + 'px';
-      el.style.width = (R*2) + 'px';
-      el.style.height = (R*2) + 'px';
-      el.style.backgroundSize = rect().width + 'px ' + rect().height + 'px';
-      el.style.backgroundPosition = (-cx + R) + 'px ' + (-cy + R) + 'px';
+    function drawBaseLayers(){
+      const r = cssRect();
+      octx.clearRect(0,0,r.width,r.height);
+      mctx.clearRect(0,0,r.width,r.height);
+      if (origBmp) octx.drawImage(origBmp, 0,0, r.width, r.height);
+      if (modBmp)  mctx.drawImage(modBmp,  0,0, r.width, r.height);
     }
 
-    function patchForPoint(p){
-      const r = rect();
-      const cx = p.xNorm * r.width, cy = p.yNorm * r.height; const R = radiusPx();
-      const el = document.createElement('div'); el.className = 'patch';
-      el.style.backgroundImage = `url(${origImgUrl})`;
-      positionPatch(el, cx, cy, R);
-      return el;
+    function eraseHole(cx, cy, R){
+      mctx.save();
+      mctx.globalCompositeOperation = 'destination-out';
+      mctx.beginPath();
+      mctx.arc(cx, cy, R, 0, Math.PI*2);
+      mctx.fill();
+      mctx.restore();
+      // Keep drawing into normal mode afterwards
+      mctx.globalCompositeOperation = 'source-over';
     }
 
-    function redrawPatches(){
-      patchLayer.innerHTML = '';
+    function replayHoles(){
+      const r = cssRect();
+      const R = radiusPx();
       for (const idx of found){
         const p = cfg.points[idx];
-        const el = patchForPoint(p);
-        patchLayer.appendChild(el);
-        requestAnimationFrame(()=> el.classList.add('in'));
+        eraseHole(p.xNorm*r.width, p.yNorm*r.height, R);
       }
     }
 
+    // Animate: grow the cutout from 0 → R so it visibly reveals the original
+    function animateErase(idx, done){
+      const r = cssRect();
+      const p = cfg.points[idx];
+      const cx = p.xNorm*r.width, cy = p.yNorm*r.height; const R = radiusPx();
+      let i=0, steps=12;
+      const step = ()=>{
+        i++;
+        eraseHole(cx, cy, (i/steps)*R);
+        if (i<steps) requestAnimationFrame(step); else { if (done) done(); }
+      };
+      step();
+    }
+
+    function onPlayClick(ev){
+      if (!cfg || !imagesReady()) return;
+      const r = cssRect();
+      const x = ev.clientX - r.left; const y = ev.clientY - r.top;
+      const R = radiusPx(); const Rhit = R * HIT_FUDGE;
+      let hitIndex = -1;
+      cfg.points.forEach((p,idx)=>{
+        if (hitIndex!==-1 || found.has(idx)) return;
+        const px = p.xNorm*r.width, py = p.yNorm*r.height;
+        const dx = x - px, dy = y - py; if (Math.hypot(dx,dy) <= Rhit) hitIndex = idx;
+      });
+      if (hitIndex === -1){ wrongClick(); return; }
+      found.add(hitIndex);
+      animateErase(hitIndex, ()=>{
+        const elapsed = performance.now() - bonusStart;
+        const steps = Math.floor(elapsed / BONUS_STEP_MS);
+        const currentBonus = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
+        const gain = 200 + currentBonus; score += gain; scoreEl.textContent = score; showGain(gain);
+        foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
+        if (found.size >= (cfg.need || cfg.points.length)) finish();
+      });
+    }
+
+    // UI & timers
     function showGain(val){
       lastGainEl.textContent = (val>0?'+':'') + val;
       lastGainEl.style.display = 'inline-block';
@@ -238,43 +285,16 @@
       setTimeout(()=>{ lastGainEl.style.transition='opacity 600ms'; lastGainEl.style.opacity='0'; }, 50);
       setTimeout(()=>{ lastGainEl.style.display='none'; lastGainEl.style.transition=''; }, 700);
     }
-
     function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); }
     function flashBorder(el,kind){ el.style.boxShadow = kind==='bad' ? '0 0 0 3px #ff5c5c88 inset' : '0 0 0 3px #53d76988 inset'; setTimeout(()=> el.style.boxShadow='none', 200); }
 
-    function onClickLeft(ev){
-      if (!cfg || !imagesReady()) return;
-      const r = rect();
-      const x = ev.clientX - r.left; const y = ev.clientY - r.top;
-      const R = radiusPx() * HIT_FUDGE;
-      let hitIndex = -1;
-      cfg.points.forEach((p,idx)=>{
-        if (hitIndex!==-1 || found.has(idx)) return;
-        const px = p.xNorm * r.width, py = p.yNorm * r.height;
-        const dx = x - px, dy = y - py; if (Math.hypot(dx,dy) <= R) hitIndex = idx;
-      });
-      if (hitIndex === -1){ wrongClick(); return; }
-      found.add(hitIndex);
-      const el = patchForPoint(cfg.points[hitIndex]);
-      patchLayer.appendChild(el);
-      requestAnimationFrame(()=> el.classList.add('in'));
-
-      const elapsed = performance.now() - bonusStart;
-      const steps = Math.floor(elapsed / BONUS_STEP_MS);
-      const currentBonus = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
-      const gain = 200 + currentBonus; score += gain; scoreEl.textContent = score; showGain(gain);
-      foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
-      if (found.size >= (cfg.need || cfg.points.length)) finish();
-    }
-
-    // Timers and discrete bonus
     function startTimers(){
       upStart = performance.now(); if (upTimerId) cancelAnimationFrame(upTimerId);
       const tick = ()=>{
         const now = performance.now();
-        const ms = now - upStart; const s = Math.floor(ms/1000), m = Math.floor(s/60), r = s%60;
+        const s = Math.floor((now - upStart)/1000); const m = Math.floor(s/60), r = s%60;
         upTimerEl.textContent = `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
-        const elapsed = now - bonusStart; const steps = Math.floor(elapsed / BONUS_STEP_MS);
+        const steps = Math.floor((now - bonusStart) / BONUS_STEP_MS);
         const b = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
         if (bonusEl.textContent !== String(b)) bonusEl.textContent = b;
         bonusFill.style.width = `${(b/BONUS_MAX)*100}%`;
@@ -284,11 +304,10 @@
     }
     function resetBonus(){ bonusStart = performance.now(); }
 
-    // Hint: much larger
     function doHint(){
       if (!cfg) return;
       const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i)); if (!unresolved.length) return;
-      const r = rect();
+      const r = cssRect();
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
       const p = cfg.points[idx];
       const x = p.xNorm*r.width, y = p.yNorm*r.height; const R = radiusPx()*HINT_FACTOR;
@@ -300,34 +319,31 @@
       const interval = setInterval(()=>{ flashes++; blink(); if (flashes>7){ clearInterval(interval); ring.remove(); } }, 200);
     }
 
-    // Loaders (use createImageBitmap for color-stable rendering)
-    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp, url} = await loadAsBitmap(f); modImg = bmp; modLeft.src = url; };
-    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {url} = await loadAsBitmap(f); origImgUrl = url; origRight.src = url; };
+    // Loaders
+    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp} = await loadBitmap(f); modBmp=bmp; };
+    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp, url} = await loadBitmap(f); origBmp=bmp; origUrl=url; origRight.src=url; };
     cfgFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ cfg=JSON.parse(r.result); resetState(); }catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f); };
 
     function resetState(){
       score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
       found = new Set(); foundEl.textContent = 0; needEl.textContent = cfg?.need || (cfg?.points? cfg.points.length : 10);
-      setAspectToNatural(); patchLayer.innerHTML='';
-      // Ensure no tint
-      modLeft.style.filter='none'; modLeft.style.opacity='1'; modLeft.style.mixBlendMode='normal';
-      origRight.style.filter='none';
+      setAspect(); sizeCanvases(); drawBaseLayers(); // draw both images
       resetBonus();
     }
 
     // Start game
     startBtn.onclick = ()=>{
       if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
-      setAspectToNatural();
+      setAspect();
       document.body.classList.add('playing');
-      requestAnimationFrame(()=>{ redrawPatches(); startTimers(); });
+      requestAnimationFrame(()=>{ sizeCanvases(); drawBaseLayers(); startTimers(); });
     };
 
     // Interactions & resize
-    stack.addEventListener('click', onClickLeft);
+    modCanvas.addEventListener('click', onPlayClick);
     hintBtnUnder.onclick = doHint;
     resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
-    window.addEventListener('resize', ()=>{ if(!cfg) return; redrawPatches(); });
+    window.addEventListener('resize', ()=>{ if(!cfg) return; sizeCanvases(); drawBaseLayers(); replayHoles(); });
 
     // Finish modal
     function finish(){ cancelAnimationFrame(upTimerId); document.getElementById('sumScore').textContent = score; document.getElementById('sumTime').textContent = upTimerEl.textContent; doneModal.style.display='flex'; }
