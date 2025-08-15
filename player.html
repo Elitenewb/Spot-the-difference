@@ -28,10 +28,12 @@
     /* Frames match image aspect ratio at runtime */
     .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;background:#0a0d1b}
 
-    /* Left (play) side: two stacked HTML <img> to avoid SVG/canvas color shifts */
+    /* Left (play) side: stack one IMG and overlay circular patches (no canvas/SVG masks) */
     .stack{position:relative;width:100%;height:100%}
-    .layer{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill;image-rendering:auto;filter:none;mix-blend-mode:normal;}
-    /* mask applied to #modLeft only */
+    #modLeft{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill;filter:none;mix-blend-mode:normal;opacity:1}
+    #patchLayer{position:absolute;inset:0;pointer-events:none}
+    .patch{position:absolute;border-radius:50%;background-size:100% 100%;background-repeat:no-repeat;opacity:0;transition:opacity 180ms ease}
+    .patch.in{opacity:1}
 
     /* Right (reference) */
     #origRight{width:100%;height:100%;object-fit:fill;display:block}
@@ -45,6 +47,7 @@
     .stats{display:flex;gap:10px;flex-wrap:wrap}
     .chip{background:#0e1327;border:1px solid #2b3152;border-radius:999px;padding:6px 10px;color:var(--muted)}
     .gain{background:#0a1a0f;border-color:#1f6f3b;color:#c7f7d1}
+    .num{display:inline-block;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
 
     .hintPulse{position:absolute;border:2px solid #fff;border-radius:50%;opacity:0;pointer-events:none;z-index:5}
 
@@ -66,10 +69,10 @@
   <header>
     <h1>Spot the Difference</h1>
     <div class="stats">
-      <div class="chip">Total: <span id="score">0</span></div>
+      <div class="chip">Total: <span id="score" class="num">0</span></div>
       <div class="chip gain" id="lastGain" style="display:none">+0</div>
-      <div class="chip">Time Bonus: <span id="bonus">1000</span></div>
-      <div class="chip">Found: <span id="found">0</span>/<span id="need">10</span></div>
+      <div class="chip">Time Bonus: <span id="bonus" class="num">1000</span></div>
+      <div class="chip">Found: <span id="found" class="num">0</span>/<span id="need" class="num">10</span></div>
     </div>
   </header>
   <main>
@@ -88,7 +91,7 @@
       </div>
       <div class="section">
         <div class="bar"><div id="bonusFill" class="fill" style="width:100%"></div></div>
-        <div class="hint" style="color:var(--muted);margin-top:6px">Each find = <b>200</b> + current time bonus (1000→0 over 20s). Wrong click: <span style="color:var(--bad)">-25</span>.</div>
+        <div class="hint" style="color:var(--muted);margin-top:6px">Each find = <b>200</b> + time bonus. Wrong click: <span style="color:var(--bad)">-25</span>.</div>
       </div>
     </aside>
     <div class="game">
@@ -96,8 +99,8 @@
         <div class="frame" id="leftFrame">
           <span class="badge">Modified (clickable)</span>
           <div class="stack" id="stack">
-            <img id="origLeft" class="layer" alt="Original (below)" />
-            <img id="modLeft" class="layer" alt="Modified (masked)" />
+            <img id="modLeft" alt="Modified" />
+            <div id="patchLayer"></div>
           </div>
         </div>
         <div class="under-left"><button id="hintBtnUnder" class="btn" type="button">Hint</button></div>
@@ -138,7 +141,7 @@
     const rightFrame = document.getElementById('rightFrame');
     const stack = document.getElementById('stack');
     const modLeft = document.getElementById('modLeft');
-    const origLeft = document.getElementById('origLeft');
+    const patchLayer = document.getElementById('patchLayer');
     const origRight = document.getElementById('origRight');
 
     const scoreEl = document.getElementById('score');
@@ -154,8 +157,8 @@
     const playAgain = document.getElementById('playAgain');
 
     // State
-    let modImg = new Image();
-    let origImg = new Image();
+    let modImg = null; // ImageBitmap for rendering consistency
+    let origImgUrl = '';
     let cfg = null; // {radiusNorm, points[{xNorm,yNorm}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
@@ -166,36 +169,33 @@
     let bonusStart = 0; // ms timestamp for current 20s window
     const BONUS_WINDOW = 20000; // 20s
     const BONUS_MAX = 1000;
+    const BONUS_STEP_MS = 2000; // update every 2s
+    const BONUS_STEP_VAL = BONUS_MAX / (BONUS_WINDOW / BONUS_STEP_MS); // 100 per step
 
-    // Hint radius multiplier (bigger, per request)
-    const HINT_FACTOR = 5;
+    // Click radius helpers
+    const HINT_FACTOR = 8; // much larger, per request
+    const HIT_FUDGE = 1.15; // widen hit circle slightly to match perception
 
-    function imagesReady(){ return modImg.naturalWidth && origImg.naturalWidth; }
+    function imagesReady(){ return !!(modImg && origImgUrl); }
 
-    // Hidden mask canvas: white = keep modified, black = reveal original
-    const maskCanvas = document.createElement('canvas');
-    const mctx = maskCanvas.getContext('2d');
+    async function loadAsBitmap(file){
+      const blobUrl = URL.createObjectURL(file);
+      // Draw unaltered color; avoid browser color conversion on canvas
+      const bmp = await createImageBitmap(file, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }).catch(()=>null);
+      return { bmp, url: blobUrl };
+    }
 
     function setAspectToNatural(){
-      const w = cfg?.natural?.w || modImg.naturalWidth;
-      const h = cfg?.natural?.h || modImg.naturalHeight;
-      if (w && h){
-        leftFrame.style.aspectRatio = `${w} / ${h}`;
-        rightFrame.style.aspectRatio = `${w} / ${h}`;
-      }
+      const w = cfg?.natural?.w || modImg?.width || 4;
+      const h = cfg?.natural?.h || modImg?.height || 3;
+      leftFrame.style.aspectRatio = `${w} / ${h}`;
+      rightFrame.style.aspectRatio = `${w} / ${h}`;
     }
 
-    function sizeMaskToDisplay(){
-      const rect = modLeft.getBoundingClientRect();
-      const bw = Math.max(1, Math.round(rect.width));
-      const bh = Math.max(1, Math.round(rect.height));
-      if (maskCanvas.width !== bw || maskCanvas.height !== bh){
-        maskCanvas.width = bw; maskCanvas.height = bh;
-      }
-    }
+    function rect(){ return stack.getBoundingClientRect(); }
 
     function radiusPx(){
-      const s = Math.min(maskCanvas.width, maskCanvas.height);
+      const r = rect(); const s = Math.min(r.width, r.height);
       if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
       if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
         return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s;
@@ -203,74 +203,33 @@
       return 24;
     }
 
-    function applyMask(){
-      const url = maskCanvas.toDataURL('image/png');
-      modLeft.style.webkitMaskImage = `url(${url})`;
-      modLeft.style.maskImage = `url(${url})`;
-      modLeft.style.webkitMaskSize = '100% 100%';
-      modLeft.style.maskSize = '100% 100%';
-      modLeft.style.webkitMaskRepeat = 'no-repeat';
-      modLeft.style.maskRepeat = 'no-repeat';
-      // Ensure no tint: display images as-is
-      modLeft.style.filter = 'none'; origLeft.style.filter = 'none'; origRight.style.filter='none';
-      modLeft.style.mixBlendMode = 'normal'; origLeft.style.mixBlendMode='normal';
+    function positionPatch(el, cx, cy, R){
+      el.style.left = (cx - R) + 'px';
+      el.style.top = (cy - R) + 'px';
+      el.style.width = (R*2) + 'px';
+      el.style.height = (R*2) + 'px';
+      el.style.backgroundSize = rect().width + 'px ' + rect().height + 'px';
+      el.style.backgroundPosition = (-cx + R) + 'px ' + (-cy + R) + 'px';
     }
 
-    function clearMask(){
-      sizeMaskToDisplay();
-      mctx.save();
-      mctx.globalCompositeOperation = 'source-over';
-      mctx.fillStyle = '#fff';
-      mctx.fillRect(0,0,maskCanvas.width,maskCanvas.height);
-      mctx.restore();
-      applyMask();
+    function patchForPoint(p){
+      const r = rect();
+      const cx = p.xNorm * r.width, cy = p.yNorm * r.height; const R = radiusPx();
+      const el = document.createElement('div'); el.className = 'patch';
+      el.style.backgroundImage = `url(${origImgUrl})`;
+      positionPatch(el, cx, cy, R);
+      return el;
     }
 
-    function drawMaskWithHoles(extra){
-      clearMask();
-      const rect = modLeft.getBoundingClientRect();
-      const bw = rect.width, bh = rect.height;
-      const R = radiusPx();
-      mctx.save();
-      mctx.fillStyle = '#000';
+    function redrawPatches(){
+      patchLayer.innerHTML = '';
       for (const idx of found){
         const p = cfg.points[idx];
-        const cx = p.xNorm * bw, cy = p.yNorm * bh;
-        mctx.beginPath(); mctx.arc(cx, cy, R, 0, Math.PI*2); mctx.fill();
+        const el = patchForPoint(p);
+        patchLayer.appendChild(el);
+        requestAnimationFrame(()=> el.classList.add('in'));
       }
-      if (extra){
-        mctx.beginPath(); mctx.arc(extra.x, extra.y, extra.r, 0, Math.PI*2); mctx.fill();
-      }
-      mctx.restore();
-      applyMask();
     }
-
-    function animateReveal(cx, cy, R, done){
-      const steps = 12; let i = 0;
-      (function step(){
-        i++; const r = (i/steps) * R;
-        drawMaskWithHoles({x:cx, y:cy, r});
-        if (i < steps) requestAnimationFrame(step); else { drawMaskWithHoles(); if (done) done(); }
-      })();
-    }
-
-    function startTimers(){
-      upStart = performance.now();
-      if (upTimerId) cancelAnimationFrame(upTimerId);
-      const tick = ()=>{
-        const ms = performance.now() - upStart;
-        const s = Math.floor(ms/1000), m = Math.floor(s/60), r = s%60;
-        upTimerEl.textContent = `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
-        const bms = Math.max(0, BONUS_WINDOW - (performance.now() - bonusStart));
-        const b = Math.round((bms/ BONUS_WINDOW) * BONUS_MAX);
-        bonusEl.textContent = b;
-        bonusFill.style.width = `${(b/BONUS_MAX)*100}%`;
-        upTimerId = requestAnimationFrame(tick);
-      };
-      upTimerId = requestAnimationFrame(tick);
-      resetBonus();
-    }
-    function resetBonus(){ bonusStart = performance.now(); }
 
     function showGain(val){
       lastGainEl.textContent = (val>0?'+':'') + val;
@@ -283,14 +242,11 @@
     function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); }
     function flashBorder(el,kind){ el.style.boxShadow = kind==='bad' ? '0 0 0 3px #ff5c5c88 inset' : '0 0 0 3px #53d76988 inset'; setTimeout(()=> el.style.boxShadow='none', 200); }
 
-    function rect(){ return modLeft.getBoundingClientRect(); }
-
     function onClickLeft(ev){
       if (!cfg || !imagesReady()) return;
       const r = rect();
       const x = ev.clientX - r.left; const y = ev.clientY - r.top;
-      const R = radiusPx();
-      // hit test
+      const R = radiusPx() * HIT_FUDGE;
       let hitIndex = -1;
       cfg.points.forEach((p,idx)=>{
         if (hitIndex!==-1 || found.has(idx)) return;
@@ -299,20 +255,39 @@
       });
       if (hitIndex === -1){ wrongClick(); return; }
       found.add(hitIndex);
-      const p = cfg.points[hitIndex];
-      const cx = p.xNorm * r.width, cy = p.yNorm * r.height;
-      animateReveal(cx, cy, R, ()=>{
-        const currentBonus = Math.max(0, Math.round((BONUS_WINDOW - (performance.now() - bonusStart)) / BONUS_WINDOW * BONUS_MAX));
-        const gain = 200 + currentBonus; score += gain; scoreEl.textContent = score; showGain(gain);
-        foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
-        if (found.size >= (cfg.need || cfg.points.length)) finish();
-      });
+      const el = patchForPoint(cfg.points[hitIndex]);
+      patchLayer.appendChild(el);
+      requestAnimationFrame(()=> el.classList.add('in'));
+
+      const elapsed = performance.now() - bonusStart;
+      const steps = Math.floor(elapsed / BONUS_STEP_MS);
+      const currentBonus = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
+      const gain = 200 + currentBonus; score += gain; scoreEl.textContent = score; showGain(gain);
+      foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
+      if (found.size >= (cfg.need || cfg.points.length)) finish();
     }
 
+    // Timers and discrete bonus
+    function startTimers(){
+      upStart = performance.now(); if (upTimerId) cancelAnimationFrame(upTimerId);
+      const tick = ()=>{
+        const now = performance.now();
+        const ms = now - upStart; const s = Math.floor(ms/1000), m = Math.floor(s/60), r = s%60;
+        upTimerEl.textContent = `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
+        const elapsed = now - bonusStart; const steps = Math.floor(elapsed / BONUS_STEP_MS);
+        const b = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
+        if (bonusEl.textContent !== String(b)) bonusEl.textContent = b;
+        bonusFill.style.width = `${(b/BONUS_MAX)*100}%`;
+        upTimerId = requestAnimationFrame(tick);
+      };
+      upTimerId = requestAnimationFrame(tick); resetBonus();
+    }
+    function resetBonus(){ bonusStart = performance.now(); }
+
+    // Hint: much larger
     function doHint(){
       if (!cfg) return;
-      const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i));
-      if (!unresolved.length) return;
+      const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i)); if (!unresolved.length) return;
       const r = rect();
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
       const p = cfg.points[idx];
@@ -325,16 +300,18 @@
       const interval = setInterval(()=>{ flashes++; blink(); if (flashes>7){ clearInterval(interval); ring.remove(); } }, 200);
     }
 
-    // Loaders
-    modFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ modImg.src=r.result; modLeft.src=r.result; }; r.readAsDataURL(f); };
-    origFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ origImg.src=r.result; origLeft.src=r.result; origRight.src=r.result; }; r.readAsDataURL(f); };
+    // Loaders (use createImageBitmap for color-stable rendering)
+    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp, url} = await loadAsBitmap(f); modImg = bmp; modLeft.src = url; };
+    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {url} = await loadAsBitmap(f); origImgUrl = url; origRight.src = url; };
     cfgFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ cfg=JSON.parse(r.result); resetState(); }catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f); };
 
     function resetState(){
       score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
       found = new Set(); foundEl.textContent = 0; needEl.textContent = cfg?.need || (cfg?.points? cfg.points.length : 10);
-      setAspectToNatural();
-      requestAnimationFrame(()=>{ sizeMaskToDisplay(); clearMask(); });
+      setAspectToNatural(); patchLayer.innerHTML='';
+      // Ensure no tint
+      modLeft.style.filter='none'; modLeft.style.opacity='1'; modLeft.style.mixBlendMode='normal';
+      origRight.style.filter='none';
       resetBonus();
     }
 
@@ -343,14 +320,14 @@
       if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
       setAspectToNatural();
       document.body.classList.add('playing');
-      requestAnimationFrame(()=>{ sizeMaskToDisplay(); clearMask(); startTimers(); });
+      requestAnimationFrame(()=>{ redrawPatches(); startTimers(); });
     };
 
     // Interactions & resize
     stack.addEventListener('click', onClickLeft);
     hintBtnUnder.onclick = doHint;
     resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
-    window.addEventListener('resize', ()=>{ if(!cfg) return; sizeMaskToDisplay(); drawMaskWithHoles(); });
+    window.addEventListener('resize', ()=>{ if(!cfg) return; redrawPatches(); });
 
     // Finish modal
     function finish(){ cancelAnimationFrame(upTimerId); document.getElementById('sumScore').textContent = score; document.getElementById('sumTime').textContent = upTimerEl.textContent; doneModal.style.display='flex'; }
