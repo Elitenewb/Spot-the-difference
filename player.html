@@ -24,13 +24,16 @@
 
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
     .game{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
-    .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3;background:#0a0d1b}
 
-    /* Left (play) side built with SVG masking to avoid canvas color shifts */
-    #leftSvg{width:100%;height:100%;display:block}
-    #leftSvg image{width:100%;height:100%}
+    /* Frames match image aspect ratio at runtime */
+    .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;background:#0a0d1b}
 
-    /* Right (reference) image */
+    /* Left (play) side: two stacked HTML <img> to avoid SVG/canvas color shifts */
+    .stack{position:relative;width:100%;height:100%}
+    .layer{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill;image-rendering:auto;filter:none;mix-blend-mode:normal;}
+    /* mask applied to #modLeft only */
+
+    /* Right (reference) */
     #origRight{width:100%;height:100%;object-fit:fill;display:block}
 
     .badge{position:absolute;top:8px;left:8px;background:#000c;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
@@ -92,23 +95,15 @@
       <div class="card">
         <div class="frame" id="leftFrame">
           <span class="badge">Modified (clickable)</span>
-          <!-- SVG stack: original below, modified above with a hole mask -->
-          <svg id="leftSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-            <defs>
-              <mask id="holeMask" maskUnits="userSpaceOnUse">
-                <!-- start fully opaque (show all modified); we will add black ellipses to reveal original -->
-                <rect x="0" y="0" width="100%" height="100%" fill="white"/>
-                <g id="holes"></g>
-              </mask>
-            </defs>
-            <image id="origLeft" href="" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none"/>
-            <image id="modLeft" href="" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" style="mask:url(#holeMask)"/>
-          </svg>
+          <div class="stack" id="stack">
+            <img id="origLeft" class="layer" alt="Original (below)" />
+            <img id="modLeft" class="layer" alt="Modified (masked)" />
+          </div>
         </div>
         <div class="under-left"><button id="hintBtnUnder" class="btn" type="button">Hint</button></div>
       </div>
       <div class="card">
-        <div class="frame">
+        <div class="frame" id="rightFrame">
           <span class="badge">Original (reference)</span>
           <img id="origRight" alt="Original" />
         </div>
@@ -140,8 +135,8 @@
     const resetBtn = document.getElementById('resetBtn');
 
     const leftFrame = document.getElementById('leftFrame');
-    const leftSvg = document.getElementById('leftSvg');
-    const holeGroup = document.getElementById('holes');
+    const rightFrame = document.getElementById('rightFrame');
+    const stack = document.getElementById('stack');
     const modLeft = document.getElementById('modLeft');
     const origLeft = document.getElementById('origLeft');
     const origRight = document.getElementById('origRight');
@@ -172,43 +167,93 @@
     const BONUS_WINDOW = 20000; // 20s
     const BONUS_MAX = 1000;
 
+    // Hint radius multiplier (bigger, per request)
+    const HINT_FACTOR = 5;
+
     function imagesReady(){ return modImg.naturalWidth && origImg.naturalWidth; }
 
-    // === Loaders ===
-    modFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return;
-      const r = new FileReader(); r.onload = ()=>{ modImg.src = r.result; modLeft.setAttribute('href', r.result); }; r.readAsDataURL(f);
-    };
-    origFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return;
-      const r = new FileReader(); r.onload = ()=>{ origImg.src = r.result; origLeft.setAttribute('href', r.result); origRight.src = r.result; }; r.readAsDataURL(f);
-    };
-    cfgFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return;
-      const r = new FileReader(); r.onload = ()=>{ try{ cfg = JSON.parse(r.result); resetState(); } catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f);
-    };
+    // Hidden mask canvas: white = keep modified, black = reveal original
+    const maskCanvas = document.createElement('canvas');
+    const mctx = maskCanvas.getContext('2d');
 
-    // === Game flow ===
-    startBtn.onclick = ()=>{
-      if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
-      // Align SVG viewBox to natural image size for correct coordinates
-      leftSvg.setAttribute('viewBox', `0 0 ${cfg.natural?.w || modImg.naturalWidth} ${cfg.natural?.h || modImg.naturalHeight}`);
-      document.body.classList.add('playing');
-      requestAnimationFrame(()=>{ startTimers(); });
-    };
-
-    resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
-
-    function resetState(){
-      score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
-      found = new Set(); foundEl.textContent = 0;
-      needEl.textContent = cfg?.need || (cfg?.points ? cfg.points.length : 10);
-      // Clear mask holes
-      while (holeGroup.firstChild) holeGroup.removeChild(holeGroup.firstChild);
-      resetBonus();
+    function setAspectToNatural(){
+      const w = cfg?.natural?.w || modImg.naturalWidth;
+      const h = cfg?.natural?.h || modImg.naturalHeight;
+      if (w && h){
+        leftFrame.style.aspectRatio = `${w} / ${h}`;
+        rightFrame.style.aspectRatio = `${w} / ${h}`;
+      }
     }
 
-    // === Timers & scoring ===
+    function sizeMaskToDisplay(){
+      const rect = modLeft.getBoundingClientRect();
+      const bw = Math.max(1, Math.round(rect.width));
+      const bh = Math.max(1, Math.round(rect.height));
+      if (maskCanvas.width !== bw || maskCanvas.height !== bh){
+        maskCanvas.width = bw; maskCanvas.height = bh;
+      }
+    }
+
+    function radiusPx(){
+      const s = Math.min(maskCanvas.width, maskCanvas.height);
+      if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
+      if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
+        return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s;
+      }
+      return 24;
+    }
+
+    function applyMask(){
+      const url = maskCanvas.toDataURL('image/png');
+      modLeft.style.webkitMaskImage = `url(${url})`;
+      modLeft.style.maskImage = `url(${url})`;
+      modLeft.style.webkitMaskSize = '100% 100%';
+      modLeft.style.maskSize = '100% 100%';
+      modLeft.style.webkitMaskRepeat = 'no-repeat';
+      modLeft.style.maskRepeat = 'no-repeat';
+      // Ensure no tint: display images as-is
+      modLeft.style.filter = 'none'; origLeft.style.filter = 'none'; origRight.style.filter='none';
+      modLeft.style.mixBlendMode = 'normal'; origLeft.style.mixBlendMode='normal';
+    }
+
+    function clearMask(){
+      sizeMaskToDisplay();
+      mctx.save();
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.fillStyle = '#fff';
+      mctx.fillRect(0,0,maskCanvas.width,maskCanvas.height);
+      mctx.restore();
+      applyMask();
+    }
+
+    function drawMaskWithHoles(extra){
+      clearMask();
+      const rect = modLeft.getBoundingClientRect();
+      const bw = rect.width, bh = rect.height;
+      const R = radiusPx();
+      mctx.save();
+      mctx.fillStyle = '#000';
+      for (const idx of found){
+        const p = cfg.points[idx];
+        const cx = p.xNorm * bw, cy = p.yNorm * bh;
+        mctx.beginPath(); mctx.arc(cx, cy, R, 0, Math.PI*2); mctx.fill();
+      }
+      if (extra){
+        mctx.beginPath(); mctx.arc(extra.x, extra.y, extra.r, 0, Math.PI*2); mctx.fill();
+      }
+      mctx.restore();
+      applyMask();
+    }
+
+    function animateReveal(cx, cy, R, done){
+      const steps = 12; let i = 0;
+      (function step(){
+        i++; const r = (i/steps) * R;
+        drawMaskWithHoles({x:cx, y:cy, r});
+        if (i < steps) requestAnimationFrame(step); else { drawMaskWithHoles(); if (done) done(); }
+      })();
+    }
+
     function startTimers(){
       upStart = performance.now();
       if (upTimerId) cancelAnimationFrame(upTimerId);
@@ -226,6 +271,7 @@
       resetBonus();
     }
     function resetBonus(){ bonusStart = performance.now(); }
+
     function showGain(val){
       lastGainEl.textContent = (val>0?'+':'') + val;
       lastGainEl.style.display = 'inline-block';
@@ -234,107 +280,82 @@
       setTimeout(()=>{ lastGainEl.style.display='none'; lastGainEl.style.transition=''; }, 700);
     }
 
-    // === Geometry helpers ===
-    function rect(){ return leftSvg.getBoundingClientRect(); }
-    function radiusPx(){
-      const s = Math.min(rect().width, rect().height);
-      if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
-      if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
-        return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s; // back-compat
-      }
-      return 24;
-    }
-    function dist(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return Math.hypot(dx,dy); }
+    function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); }
+    function flashBorder(el,kind){ el.style.boxShadow = kind==='bad' ? '0 0 0 3px #ff5c5c88 inset' : '0 0 0 3px #53d76988 inset'; setTimeout(()=> el.style.boxShadow='none', 200); }
 
-    // Convert screen px to SVG user units
-    function toSvgUnits(xCss, yCss){
-      const r = rect();
-      const vw = (cfg?.natural?.w || modImg.naturalWidth) || r.width;
-      const vh = (cfg?.natural?.h || modImg.naturalHeight) || r.height;
-      const x = (xCss / r.width) * vw;
-      const y = (yCss / r.height) * vh;
-      return {x,y,vw,vh};
-    }
+    function rect(){ return modLeft.getBoundingClientRect(); }
 
-    // Append an animating ellipse hole to the mask
-    function addHole(xCss, yCss){
-      const rCss = radiusPx();
-      const {x, y, vw, vh} = toSvgUnits(xCss, yCss);
-      const rxTarget = rCss * ( (cfg?.natural?.w || modImg.naturalWidth) / rect().width );
-      const ryTarget = rCss * ( (cfg?.natural?.h || modImg.naturalHeight) / rect().height );
-      const ell = document.createElementNS('http://www.w3.org/2000/svg','ellipse');
-      ell.setAttribute('cx', x);
-      ell.setAttribute('cy', y);
-      ell.setAttribute('rx', '0');
-      ell.setAttribute('ry', '0');
-      ell.setAttribute('fill', 'black'); // black = transparent area in the mask
-      holeGroup.appendChild(ell);
-      // animate to target radii
-      let i=0, steps=10;
-      const step = ()=>{
-        i++; const t = i/steps;
-        ell.setAttribute('rx', (rxTarget*t).toString());
-        ell.setAttribute('ry', (ryTarget*t).toString());
-        if (i<steps) requestAnimationFrame(step);
-      };
-      step();
-    }
-
-    // === Interaction ===
-    leftSvg.addEventListener('click', (ev)=>{
+    function onClickLeft(ev){
       if (!cfg || !imagesReady()) return;
       const r = rect();
-      const xCss = ev.clientX - r.left;
-      const yCss = ev.clientY - r.top;
-      const bw = r.width, bh = r.height;
+      const x = ev.clientX - r.left; const y = ev.clientY - r.top;
       const R = radiusPx();
-      // hit test in CSS px
+      // hit test
       let hitIndex = -1;
       cfg.points.forEach((p,idx)=>{
         if (hitIndex!==-1 || found.has(idx)) return;
-        const px = p.xNorm * bw, py = p.yNorm * bh;
-        if (dist(xCss,yCss,px,py) <= R) hitIndex = idx;
+        const px = p.xNorm * r.width, py = p.yNorm * r.height;
+        const dx = x - px, dy = y - py; if (Math.hypot(dx,dy) <= R) hitIndex = idx;
       });
       if (hitIndex === -1){ wrongClick(); return; }
       found.add(hitIndex);
-      addHole(xCss, yCss);
-      const currentBonus = Math.max(0, Math.round((BONUS_WINDOW - (performance.now() - bonusStart)) / BONUS_WINDOW * BONUS_MAX));
-      const gain = 200 + currentBonus;
-      score += gain; scoreEl.textContent = score; showGain(gain);
-      foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
-      if (found.size >= (cfg.need || cfg.points.length)) finish();
-    });
-
-    function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); }
-
-    function flashBorder(el,kind){
-      el.style.boxShadow = kind==='bad' ? '0 0 0 3px #ff5c5c88 inset' : '0 0 0 3px #53d76988 inset';
-      setTimeout(()=> el.style.boxShadow='none', 200);
+      const p = cfg.points[hitIndex];
+      const cx = p.xNorm * r.width, cy = p.yNorm * r.height;
+      animateReveal(cx, cy, R, ()=>{
+        const currentBonus = Math.max(0, Math.round((BONUS_WINDOW - (performance.now() - bonusStart)) / BONUS_WINDOW * BONUS_MAX));
+        const gain = 200 + currentBonus; score += gain; scoreEl.textContent = score; showGain(gain);
+        foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
+        if (found.size >= (cfg.need || cfg.points.length)) finish();
+      });
     }
 
-    // Hint ring (visual only)
-    hintBtnUnder.onclick = ()=>{
+    function doHint(){
       if (!cfg) return;
       const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i));
       if (!unresolved.length) return;
       const r = rect();
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
       const p = cfg.points[idx];
-      const x = p.xNorm*r.width, y = p.yNorm*r.height; const R = radiusPx()*3;
+      const x = p.xNorm*r.width, y = p.yNorm*r.height; const R = radiusPx()*HINT_FACTOR;
       const ring = document.createElement('div'); ring.className='hintPulse';
       ring.style.left = (x - R) + 'px'; ring.style.top = (y - R) + 'px';
       ring.style.width = (R*2)+'px'; ring.style.height = (R*2)+'px';
       leftFrame.appendChild(ring);
       let flashes = 0; const blink = ()=>{ ring.style.transition='opacity 250ms ease'; ring.style.opacity = (ring.style.opacity==='1')?'0':'1'; };
       const interval = setInterval(()=>{ flashes++; blink(); if (flashes>7){ clearInterval(interval); ring.remove(); } }, 200);
+    }
+
+    // Loaders
+    modFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ modImg.src=r.result; modLeft.src=r.result; }; r.readAsDataURL(f); };
+    origFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ origImg.src=r.result; origLeft.src=r.result; origRight.src=r.result; }; r.readAsDataURL(f); };
+    cfgFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ cfg=JSON.parse(r.result); resetState(); }catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f); };
+
+    function resetState(){
+      score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
+      found = new Set(); foundEl.textContent = 0; needEl.textContent = cfg?.need || (cfg?.points? cfg.points.length : 10);
+      setAspectToNatural();
+      requestAnimationFrame(()=>{ sizeMaskToDisplay(); clearMask(); });
+      resetBonus();
+    }
+
+    // Start game
+    startBtn.onclick = ()=>{
+      if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
+      setAspectToNatural();
+      document.body.classList.add('playing');
+      requestAnimationFrame(()=>{ sizeMaskToDisplay(); clearMask(); startTimers(); });
     };
+
+    // Interactions & resize
+    stack.addEventListener('click', onClickLeft);
+    hintBtnUnder.onclick = doHint;
+    resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
+    window.addEventListener('resize', ()=>{ if(!cfg) return; sizeMaskToDisplay(); drawMaskWithHoles(); });
 
     // Finish modal
     function finish(){ cancelAnimationFrame(upTimerId); document.getElementById('sumScore').textContent = score; document.getElementById('sumTime').textContent = upTimerEl.textContent; doneModal.style.display='flex'; }
-    document.getElementById('closeModal').onclick = ()=> doneModal.style.display='none';
-    document.getElementById('playAgain').onclick = ()=>{ doneModal.style.display='none'; resetState(); startTimers(); };
-
-    // Wrong click helper separated after definition
+    closeModal.onclick = ()=> doneModal.style.display='none';
+    playAgain.onclick = ()=>{ doneModal.style.display='none'; resetState(); startTimers(); };
   </script>
 </body>
 </html>
