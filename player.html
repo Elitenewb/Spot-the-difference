@@ -30,7 +30,7 @@
 
     /* Left (play) side: stack one IMG and overlay circular patches (no canvas/SVG masks) */
     .stack{position:relative;width:100%;height:100%}
-    #modLeft{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill;filter:none;mix-blend-mode:normal;opacity:1}
+    #modLeft{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill}
     #patchLayer{position:absolute;inset:0;pointer-events:none}
     .patch{position:absolute;border-radius:50%;background-size:100% 100%;background-repeat:no-repeat;opacity:0;transition:opacity 180ms ease}
     .patch.in{opacity:1}
@@ -157,7 +157,7 @@
     const playAgain = document.getElementById('playAgain');
 
     // State
-    let modImg = null; // ImageBitmap for rendering consistency
+    let modImgUrl = null; // Store URL instead of ImageBitmap
     let origImgUrl = '';
     let cfg = null; // {radiusNorm, points[{xNorm,yNorm}], need, natural{w,h}}
     let found = new Set();
@@ -176,18 +176,15 @@
     const HINT_FACTOR = 8; // much larger, per request
     const HIT_FUDGE = 1.15; // widen hit circle slightly to match perception
 
-    function imagesReady(){ return !!(modImg && origImgUrl); }
+    function imagesReady(){ return !!(modImgUrl && origImgUrl); }
 
-    async function loadAsBitmap(file){
-      const blobUrl = URL.createObjectURL(file);
-      // Draw unaltered color; avoid browser color conversion on canvas
-      const bmp = await createImageBitmap(file, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }).catch(()=>null);
-      return { bmp, url: blobUrl };
+    function createBlobUrl(file){
+      return URL.createObjectURL(file);
     }
 
     function setAspectToNatural(){
-      const w = cfg?.natural?.w || modImg?.width || 4;
-      const h = cfg?.natural?.h || modImg?.height || 3;
+      const w = cfg?.natural?.w || 800; // fallback dimensions
+      const h = cfg?.natural?.h || 600;
       leftFrame.style.aspectRatio = `${w} / ${h}`;
       rightFrame.style.aspectRatio = `${w} / ${h}`;
     }
@@ -300,18 +297,48 @@
       const interval = setInterval(()=>{ flashes++; blink(); if (flashes>7){ clearInterval(interval); ring.remove(); } }, 200);
     }
 
-    // Loaders (use createImageBitmap for color-stable rendering)
-    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp, url} = await loadAsBitmap(f); modImg = bmp; modLeft.src = url; };
-    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {url} = await loadAsBitmap(f); origImgUrl = url; origRight.src = url; };
-    cfgFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ cfg=JSON.parse(r.result); resetState(); }catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f); };
+    // Fixed image loaders - use direct blob URLs without ImageBitmap
+    modFile.onchange = (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      
+      // Clean up previous URL
+      if (modImgUrl) URL.revokeObjectURL(modImgUrl);
+      
+      modImgUrl = createBlobUrl(f);
+      modLeft.src = modImgUrl;
+    };
+
+    origFile.onchange = (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      
+      // Clean up previous URL
+      if (origImgUrl) URL.revokeObjectURL(origImgUrl);
+      
+      origImgUrl = createBlobUrl(f);
+      origRight.src = origImgUrl;
+    };
+
+    cfgFile.onchange = (e)=>{ 
+      const f=e.target.files[0]; 
+      if(!f) return; 
+      const r=new FileReader(); 
+      r.onload=()=>{ 
+        try{ 
+          cfg=JSON.parse(r.result); 
+          resetState(); 
+        }catch(err){ 
+          alert('Invalid config JSON: '+err.message); 
+        } 
+      }; 
+      r.readAsText(f); 
+    };
 
     function resetState(){
       score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
       found = new Set(); foundEl.textContent = 0; needEl.textContent = cfg?.need || (cfg?.points? cfg.points.length : 10);
       setAspectToNatural(); patchLayer.innerHTML='';
-      // Ensure no tint
-      modLeft.style.filter='none'; modLeft.style.opacity='1'; modLeft.style.mixBlendMode='normal';
-      origRight.style.filter='none';
       resetBonus();
     }
 
@@ -330,9 +357,20 @@
     window.addEventListener('resize', ()=>{ if(!cfg) return; redrawPatches(); });
 
     // Finish modal
-    function finish(){ cancelAnimationFrame(upTimerId); document.getElementById('sumScore').textContent = score; document.getElementById('sumTime').textContent = upTimerEl.textContent; doneModal.style.display='flex'; }
+    function finish(){ 
+      cancelAnimationFrame(upTimerId); 
+      document.getElementById('sumScore').textContent = score; 
+      document.getElementById('sumTime').textContent = upTimerEl.textContent; 
+      doneModal.style.display='flex'; 
+    }
     closeModal.onclick = ()=> doneModal.style.display='none';
     playAgain.onclick = ()=>{ doneModal.style.display='none'; resetState(); startTimers(); };
+
+    // Clean up URLs when page unloads
+    window.addEventListener('beforeunload', () => {
+      if (modImgUrl) URL.revokeObjectURL(modImgUrl);
+      if (origImgUrl) URL.revokeObjectURL(origImgUrl);
+    });
   </script>
 </body>
 </html>
