@@ -21,27 +21,39 @@
     button{cursor:pointer}
     button.primary{background:var(--accent);border-color:#66c9fb;color:#001019;font-weight:600}
     .row{display:flex;gap:10px}
+
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
     .game{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
     .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3;background:#0a0d1b}
-    canvas{width:100%;height:100%;display:block;background:transparent;}
-    #baseCanvas{position:relative;z-index:1;}
-    #revealCanvas{position:absolute;inset:0;z-index:2;pointer-events:none;filter:none;opacity:1;mix-blend-mode:normal;background:transparent;}
+
+    /* Left (play) side built with SVG masking to avoid canvas color shifts */
+    #leftSvg{width:100%;height:100%;display:block}
+    #leftSvg image{width:100%;height:100%}
+
+    /* Right (reference) image */
+    #origRight{width:100%;height:100%;object-fit:fill;display:block}
+
     .badge{position:absolute;top:8px;left:8px;background:#000c;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
     body.playing .badge{display:none}
+
     .bar{height:8px;background:#10142b;border:1px solid #2b3152;border-radius:999px;overflow:hidden}
     .fill{height:100%;background:linear-gradient(90deg,#66c9fb,#7bd4ff)}
+
     .stats{display:flex;gap:10px;flex-wrap:wrap}
     .chip{background:#0e1327;border:1px solid #2b3152;border-radius:999px;padding:6px 10px;color:var(--muted)}
-    .hintPulse{position:absolute;border:2px solid #fff;border-radius:50%;opacity:0;pointer-events:none}
+    .gain{background:#0a1a0f;border-color:#1f6f3b;color:#c7f7d1}
+
+    .hintPulse{position:absolute;border:2px solid #fff;border-radius:50%;opacity:0;pointer-events:none;z-index:5}
+
     .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center}
     .modal .inner{background:#0f142e;border:1px solid #2b3152;border-radius:16px;max-width:420px;width:92%;padding:20px}
     .modal h2{margin:0 0 12px}
     .modal .row{display:flex;justify-content:space-between;margin-top:10px}
+
     .hud{display:none;gap:12px;align-items:center;justify-content:center;padding:10px 18px;border-top:1px solid #23263d}
     body.playing .hud{display:flex}
     .hud .timer{font-variant-numeric:tabular-nums;background:#0e1327;border:1px solid #2b3152;border-radius:10px;padding:8px 12px;color:var(--muted)}
-    /* hint under left image */
+
     .under-left{display:none;justify-content:center;padding:10px}
     body.playing .under-left{display:flex}
     .btn{padding:10px 14px;border-radius:10px;border:1px solid #2b3152;background:#0e1122;color:var(--ink);cursor:pointer}
@@ -51,9 +63,10 @@
   <header>
     <h1>Spot the Difference</h1>
     <div class="stats">
-      <div class="chip">Score: <span id="score">0</span></div>
+      <div class="chip">Total: <span id="score">0</span></div>
+      <div class="chip gain" id="lastGain" style="display:none">+0</div>
+      <div class="chip">Time Bonus: <span id="bonus">1000</span></div>
       <div class="chip">Found: <span id="found">0</span>/<span id="need">10</span></div>
-      <div class="chip">Bonus: <span id="bonus">1000</span></div>
     </div>
   </header>
   <main>
@@ -72,28 +85,37 @@
       </div>
       <div class="section">
         <div class="bar"><div id="bonusFill" class="fill" style="width:100%"></div></div>
-        <div class="hint" style="color:var(--muted);margin-top:6px">Bonus counts down from 1000 → 0 over 20s. Each found difference = <b>200</b> + current bonus. Wrong click: <span style="color:var(--bad)">-25</span>.</div>
+        <div class="hint" style="color:var(--muted);margin-top:6px">Each find = <b>200</b> + current time bonus (1000→0 over 20s). Wrong click: <span style="color:var(--bad)">-25</span>.</div>
       </div>
     </aside>
     <div class="game">
       <div class="card">
         <div class="frame" id="leftFrame">
           <span class="badge">Modified (clickable)</span>
-          <canvas id="baseCanvas"></canvas>
-          <canvas id="revealCanvas"></canvas>
+          <!-- SVG stack: original below, modified above with a hole mask -->
+          <svg id="leftSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+            <defs>
+              <mask id="holeMask" maskUnits="userSpaceOnUse">
+                <!-- start fully opaque (show all modified); we will add black ellipses to reveal original -->
+                <rect x="0" y="0" width="100%" height="100%" fill="white"/>
+                <g id="holes"></g>
+              </mask>
+            </defs>
+            <image id="origLeft" href="" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none"/>
+            <image id="modLeft" href="" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" style="mask:url(#holeMask)"/>
+          </svg>
         </div>
-        <div class="under-left"><button id="hintBtnUnder" class="btn">Hint</button></div>
+        <div class="under-left"><button id="hintBtnUnder" class="btn" type="button">Hint</button></div>
       </div>
       <div class="card">
         <div class="frame">
           <span class="badge">Original (reference)</span>
-          <canvas id="origCanvas"></canvas>
+          <img id="origRight" alt="Original" />
         </div>
       </div>
     </div>
   </main>
 
-  <!-- Bottom HUD shown during play (timer only) -->
   <div class="hud" id="hud"><div id="upTimer" class="timer">00:00</div></div>
 
   <div id="doneModal" class="modal">
@@ -117,12 +139,15 @@
     const hintBtnUnder = document.getElementById('hintBtnUnder');
     const resetBtn = document.getElementById('resetBtn');
 
-    const baseCanvas = document.getElementById('baseCanvas');
-    const revealCanvas = document.getElementById('revealCanvas');
-    const origCanvas = document.getElementById('origCanvas');
     const leftFrame = document.getElementById('leftFrame');
+    const leftSvg = document.getElementById('leftSvg');
+    const holeGroup = document.getElementById('holes');
+    const modLeft = document.getElementById('modLeft');
+    const origLeft = document.getElementById('origLeft');
+    const origRight = document.getElementById('origRight');
 
     const scoreEl = document.getElementById('score');
+    const lastGainEl = document.getElementById('lastGain');
     const foundEl = document.getElementById('found');
     const needEl = document.getElementById('need');
     const bonusEl = document.getElementById('bonus');
@@ -136,7 +161,7 @@
     // State
     let modImg = new Image();
     let origImg = new Image();
-    let cfg = null; // {radiusNorm?, radius?, points[{xNorm,yNorm}], need, natural{w,h}}
+    let cfg = null; // {radiusNorm, points[{xNorm,yNorm}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
 
@@ -149,26 +174,41 @@
 
     function imagesReady(){ return modImg.naturalWidth && origImg.naturalWidth; }
 
-    // Canvas helpers
-    function drawImages() {
-      const bw = baseCanvas.clientWidth, bh = baseCanvas.clientHeight;
-      baseCanvas.width = bw; baseCanvas.height = bh;
-      revealCanvas.width = bw; revealCanvas.height = bh;
-      origCanvas.width = bw; origCanvas.height = bh;
-      const bctx = baseCanvas.getContext('2d');
-      const octx = origCanvas.getContext('2d');
-      bctx.clearRect(0,0,bw,bh); octx.clearRect(0,0,bw,bh);
-      if (modImg.complete && modImg.naturalWidth) bctx.drawImage(modImg,0,0,bw,bh);
-      if (origImg.complete && origImg.naturalWidth) octx.drawImage(origImg,0,0,bw,bh);
-      const rctx = revealCanvas.getContext('2d');
-      rctx.clearRect(0,0,bw,bh);
-      for (const idx of found) {
-        const p = cfg.points[idx];
-        const x = p.xNorm * bw, y = p.yNorm * bh;
-        revealPatch(x,y,getRadiusPx(),1,false);
-      }
+    // === Loaders ===
+    modFile.onchange = (e)=>{
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader(); r.onload = ()=>{ modImg.src = r.result; modLeft.setAttribute('href', r.result); }; r.readAsDataURL(f);
+    };
+    origFile.onchange = (e)=>{
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader(); r.onload = ()=>{ origImg.src = r.result; origLeft.setAttribute('href', r.result); origRight.src = r.result; }; r.readAsDataURL(f);
+    };
+    cfgFile.onchange = (e)=>{
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader(); r.onload = ()=>{ try{ cfg = JSON.parse(r.result); resetState(); } catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f);
+    };
+
+    // === Game flow ===
+    startBtn.onclick = ()=>{
+      if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
+      // Align SVG viewBox to natural image size for correct coordinates
+      leftSvg.setAttribute('viewBox', `0 0 ${cfg.natural?.w || modImg.naturalWidth} ${cfg.natural?.h || modImg.naturalHeight}`);
+      document.body.classList.add('playing');
+      requestAnimationFrame(()=>{ startTimers(); });
+    };
+
+    resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
+
+    function resetState(){
+      score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
+      found = new Set(); foundEl.textContent = 0;
+      needEl.textContent = cfg?.need || (cfg?.points ? cfg.points.length : 10);
+      // Clear mask holes
+      while (holeGroup.firstChild) holeGroup.removeChild(holeGroup.firstChild);
+      resetBonus();
     }
 
+    // === Timers & scoring ===
     function startTimers(){
       upStart = performance.now();
       if (upTimerId) cancelAnimationFrame(upTimerId);
@@ -185,161 +225,116 @@
       upTimerId = requestAnimationFrame(tick);
       resetBonus();
     }
-
     function resetBonus(){ bonusStart = performance.now(); }
-
-    function normFromEvent(ev, canvas){
-      const rect = canvas.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) / rect.width;
-      const y = (ev.clientY - rect.top) / rect.height;
-      return {x,y};
+    function showGain(val){
+      lastGainEl.textContent = (val>0?'+':'') + val;
+      lastGainEl.style.display = 'inline-block';
+      lastGainEl.style.opacity = '1';
+      setTimeout(()=>{ lastGainEl.style.transition='opacity 600ms'; lastGainEl.style.opacity='0'; }, 50);
+      setTimeout(()=>{ lastGainEl.style.display='none'; lastGainEl.style.transition=''; }, 700);
     }
 
-    function distance(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return Math.hypot(dx,dy); }
-
-    function getRadiusPx(){
-      const s = Math.min(baseCanvas.width, baseCanvas.height);
+    // === Geometry helpers ===
+    function rect(){ return leftSvg.getBoundingClientRect(); }
+    function radiusPx(){
+      const s = Math.min(rect().width, rect().height);
       if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
       if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
         return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s; // back-compat
       }
-      return 24; // fallback
+      return 24;
+    }
+    function dist(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return Math.hypot(dx,dy); }
+
+    // Convert screen px to SVG user units
+    function toSvgUnits(xCss, yCss){
+      const r = rect();
+      const vw = (cfg?.natural?.w || modImg.naturalWidth) || r.width;
+      const vh = (cfg?.natural?.h || modImg.naturalHeight) || r.height;
+      const x = (xCss / r.width) * vw;
+      const y = (yCss / r.height) * vh;
+      return {x,y,vw,vh};
     }
 
-    function revealPatch(x, y, r, targetAlpha = 1, animate=true){
-      const ctx = revealCanvas.getContext('2d');
-      const bw = revealCanvas.width, bh = revealCanvas.height;
-      const drawCircle = (alpha)=>{
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.closePath();
-        ctx.clip();
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(origImg,0,0,bw,bh);
-        ctx.restore();
-      };
-      if (!animate){ drawCircle(targetAlpha); return; }
-      let a = 0, steps = 10, i=0;
+    // Append an animating ellipse hole to the mask
+    function addHole(xCss, yCss){
+      const rCss = radiusPx();
+      const {x, y, vw, vh} = toSvgUnits(xCss, yCss);
+      const rxTarget = rCss * ( (cfg?.natural?.w || modImg.naturalWidth) / rect().width );
+      const ryTarget = rCss * ( (cfg?.natural?.h || modImg.naturalHeight) / rect().height );
+      const ell = document.createElementNS('http://www.w3.org/2000/svg','ellipse');
+      ell.setAttribute('cx', x);
+      ell.setAttribute('cy', y);
+      ell.setAttribute('rx', '0');
+      ell.setAttribute('ry', '0');
+      ell.setAttribute('fill', 'black'); // black = transparent area in the mask
+      holeGroup.appendChild(ell);
+      // animate to target radii
+      let i=0, steps=10;
       const step = ()=>{
-        i++; a = i/steps * targetAlpha;
-        drawCircle(a);
+        i++; const t = i/steps;
+        ell.setAttribute('rx', (rxTarget*t).toString());
+        ell.setAttribute('ry', (ryTarget*t).toString());
         if (i<steps) requestAnimationFrame(step);
       };
       step();
     }
 
-    function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); }
+    // === Interaction ===
+    leftSvg.addEventListener('click', (ev)=>{
+      if (!cfg || !imagesReady()) return;
+      const r = rect();
+      const xCss = ev.clientX - r.left;
+      const yCss = ev.clientY - r.top;
+      const bw = r.width, bh = r.height;
+      const R = radiusPx();
+      // hit test in CSS px
+      let hitIndex = -1;
+      cfg.points.forEach((p,idx)=>{
+        if (hitIndex!==-1 || found.has(idx)) return;
+        const px = p.xNorm * bw, py = p.yNorm * bh;
+        if (dist(xCss,yCss,px,py) <= R) hitIndex = idx;
+      });
+      if (hitIndex === -1){ wrongClick(); return; }
+      found.add(hitIndex);
+      addHole(xCss, yCss);
+      const currentBonus = Math.max(0, Math.round((BONUS_WINDOW - (performance.now() - bonusStart)) / BONUS_WINDOW * BONUS_MAX));
+      const gain = 200 + currentBonus;
+      score += gain; scoreEl.textContent = score; showGain(gain);
+      foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
+      if (found.size >= (cfg.need || cfg.points.length)) finish();
+    });
+
+    function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); }
 
     function flashBorder(el,kind){
       el.style.boxShadow = kind==='bad' ? '0 0 0 3px #ff5c5c88 inset' : '0 0 0 3px #53d76988 inset';
       setTimeout(()=> el.style.boxShadow='none', 200);
     }
 
-    function debugDot(x,y){
-      const dctx = revealCanvas.getContext('2d');
-      dctx.save(); dctx.fillStyle = 'rgba(255,0,0,0.8)'; dctx.beginPath(); dctx.arc(x,y,3,0,Math.PI*2); dctx.fill(); dctx.restore();
-    }
-
-    function onCanvasPress(ev){
-      if (!cfg || !imagesReady()) return;
-      const rect = baseCanvas.getBoundingClientRect();
-      const x = (ev.clientX - rect.left); // css px
-      const y = (ev.clientY - rect.top);
-      const bw = rect.width, bh = rect.height; // use css px consistently
-      const r = getRadiusPx();
-      debugDot(x, y);
-      let hitIndex = -1;
-      cfg.points.forEach((p,idx)=>{
-        if (hitIndex!==-1) return;
-        if (found.has(idx)) return;
-        const px = p.xNorm * bw, py = p.yNorm * bh;
-        if (distance(x,y,px,py) <= r) hitIndex = idx;
-      });
-      if (hitIndex === -1) { wrongClick(); return; }
-      found.add(hitIndex);
-      const p = cfg.points[hitIndex];
-      revealPatch(p.xNorm*bw, p.yNorm*bh, r, 1, true);
-      const currentBonus = Math.max(0, Math.round((BONUS_WINDOW - (performance.now() - bonusStart)) / BONUS_WINDOW * BONUS_MAX));
-      score += 200 + currentBonus;
-      scoreEl.textContent = score;
-      foundEl.textContent = found.size;
-      flashBorder(leftFrame,'good');
-      resetBonus();
-      if (found.size >= (cfg.need || cfg.points.length)) finish();
-    }
-
-    function finish(){
-      cancelAnimationFrame(upTimerId);
-      document.getElementById('sumScore').textContent = score;
-      document.getElementById('sumTime').textContent = upTimerEl.textContent;
-      doneModal.style.display = 'flex';
-    }
-
-    function doHint(){
+    // Hint ring (visual only)
+    hintBtnUnder.onclick = ()=>{
       if (!cfg) return;
       const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i));
       if (!unresolved.length) return;
-      const rect = baseCanvas.getBoundingClientRect();
-      const bw = rect.width, bh = rect.height;
+      const r = rect();
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
       const p = cfg.points[idx];
-      const x = p.xNorm*bw, y = p.yNorm*bh; const R = getRadiusPx()*3;
-      const ring = document.createElement('div');
-      ring.className = 'hintPulse';
-      ring.style.left = (x - R) + 'px';
-      ring.style.top = (y - R) + 'px';
-      ring.style.width = (R*2)+'px';
-      ring.style.height = (R*2)+'px';
+      const x = p.xNorm*r.width, y = p.yNorm*r.height; const R = radiusPx()*3;
+      const ring = document.createElement('div'); ring.className='hintPulse';
+      ring.style.left = (x - R) + 'px'; ring.style.top = (y - R) + 'px';
+      ring.style.width = (R*2)+'px'; ring.style.height = (R*2)+'px';
       leftFrame.appendChild(ring);
-      let flashes = 0;
-      const blink = ()=>{
-        ring.style.transition = 'opacity 250ms ease';
-        ring.style.opacity = (ring.style.opacity==='1') ? '0' : '1';
-      };
+      let flashes = 0; const blink = ()=>{ ring.style.transition='opacity 250ms ease'; ring.style.opacity = (ring.style.opacity==='1')?'0':'1'; };
       const interval = setInterval(()=>{ flashes++; blink(); if (flashes>7){ clearInterval(interval); ring.remove(); } }, 200);
-    }
-
-    // Loading & setup
-    function readImage(file, imgEl, onload){ const fr = new FileReader(); fr.onload = ()=> imgEl.src = fr.result; fr.readAsDataURL(file); imgEl.onload = ()=>{ drawImages(); if (onload) onload(); }; }
-    modFile.onchange = (e)=> e.target.files[0] && readImage(e.target.files[0], modImg);
-    origFile.onchange = (e)=> e.target.files[0] && readImage(e.target.files[0], origImg);
-
-    cfgFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return;
-      const r = new FileReader();
-      r.onload = ()=>{
-        try{
-          cfg = JSON.parse(r.result);
-          score = 0; scoreEl.textContent = score;
-          found = new Set(); foundEl.textContent = 0;
-          needEl.textContent = cfg.need || (cfg.points? cfg.points.length : 10);
-          drawImages();
-        }catch(err){ alert('Invalid config JSON: '+err.message); }
-      };
-      r.readAsText(f);
     };
 
-    // Interactions
-    baseCanvas.addEventListener('click', onCanvasPress);
-    baseCanvas.addEventListener('pointerdown', onCanvasPress);
-    baseCanvas.addEventListener('mousedown', onCanvasPress);
-    hintBtnUnder.onclick = doHint;
-    resetBtn.onclick = ()=>{ if(!cfg) return; score=0; scoreEl.textContent=0; found.clear(); foundEl.textContent=0; const rctx=revealCanvas.getContext('2d'); rctx.clearRect(0,0,revealCanvas.width,revealCanvas.height); resetBonus(); startTimers(); drawImages(); };
+    // Finish modal
+    function finish(){ cancelAnimationFrame(upTimerId); document.getElementById('sumScore').textContent = score; document.getElementById('sumTime').textContent = upTimerEl.textContent; doneModal.style.display='flex'; }
+    document.getElementById('closeModal').onclick = ()=> doneModal.style.display='none';
+    document.getElementById('playAgain').onclick = ()=>{ doneModal.style.display='none'; resetState(); startTimers(); };
 
-    // Start game: hide sidebar, badges, show HUD, start timers
-    startBtn.onclick = ()=>{
-      if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
-      document.body.classList.add('playing');
-      // reflow then redraw to ensure correct sizing after layout change
-      requestAnimationFrame(()=>{ drawImages(); startTimers(); });
-    };
-
-    // Resize handling
-    window.addEventListener('resize', ()=>{ drawImages(); });
-
-    // Modal buttons
-    closeModal.onclick = ()=> doneModal.style.display='none';
-    playAgain.onclick = ()=>{ doneModal.style.display='none'; resetBtn.click(); };
+    // Wrong click helper separated after definition
   </script>
 </body>
 </html>
