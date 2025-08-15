@@ -25,7 +25,8 @@
     .game{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
     .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3;background:#0a0d1b}
     canvas{width:100%;height:100%;display:block;background:transparent;}
-    #revealCanvas{position:absolute;inset:0;pointer-events:none;filter:none;}
+    #baseCanvas{position:relative;z-index:1;}
+    #revealCanvas{position:absolute;inset:0;z-index:2;pointer-events:none;filter:none;opacity:1;mix-blend-mode:normal;background:transparent;}
     .badge{position:absolute;top:8px;left:8px;background:#000c;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
     body.playing .badge{display:none}
     .bar{height:8px;background:#10142b;border:1px solid #2b3152;border-radius:999px;overflow:hidden}
@@ -39,8 +40,11 @@
     .modal .row{display:flex;justify-content:space-between;margin-top:10px}
     .hud{display:none;gap:12px;align-items:center;justify-content:center;padding:10px 18px;border-top:1px solid #23263d}
     body.playing .hud{display:flex}
-    .hud .btn{padding:10px 14px;border-radius:10px;border:1px solid #2b3152;background:#0e1122;color:var(--ink);cursor:pointer}
     .hud .timer{font-variant-numeric:tabular-nums;background:#0e1327;border:1px solid #2b3152;border-radius:10px;padding:8px 12px;color:var(--muted)}
+    /* hint under left image */
+    .under-left{display:none;justify-content:center;padding:10px}
+    body.playing .under-left{display:flex}
+    .btn{padding:10px 14px;border-radius:10px;border:1px solid #2b3152;background:#0e1122;color:var(--ink);cursor:pointer}
   </style>
 </head>
 <body>
@@ -78,6 +82,7 @@
           <canvas id="baseCanvas"></canvas>
           <canvas id="revealCanvas"></canvas>
         </div>
+        <div class="under-left"><button id="hintBtnUnder" class="btn">Hint</button></div>
       </div>
       <div class="card">
         <div class="frame">
@@ -88,11 +93,8 @@
     </div>
   </main>
 
-  <!-- Bottom HUD shown during play -->
-  <div class="hud" id="hud">
-    <button id="hintBtn" class="btn">Hint</button>
-    <div id="upTimer" class="timer">00:00</div>
-  </div>
+  <!-- Bottom HUD shown during play (timer only) -->
+  <div class="hud" id="hud"><div id="upTimer" class="timer">00:00</div></div>
 
   <div id="doneModal" class="modal">
     <div class="inner">
@@ -112,7 +114,7 @@
     const origFile = document.getElementById('origFile');
     const cfgFile = document.getElementById('cfgFile');
     const startBtn = document.getElementById('startBtn');
-    const hintBtn = document.getElementById('hintBtn');
+    const hintBtnUnder = document.getElementById('hintBtnUnder');
     const resetBtn = document.getElementById('resetBtn');
 
     const baseCanvas = document.getElementById('baseCanvas');
@@ -233,12 +235,19 @@
       setTimeout(()=> el.style.boxShadow='none', 200);
     }
 
-    function onClickCanvas(ev){
+    function debugDot(x,y){
+      const dctx = revealCanvas.getContext('2d');
+      dctx.save(); dctx.fillStyle = 'rgba(255,0,0,0.8)'; dctx.beginPath(); dctx.arc(x,y,3,0,Math.PI*2); dctx.fill(); dctx.restore();
+    }
+
+    function onCanvasPress(ev){
       if (!cfg || !imagesReady()) return;
-      const bw = baseCanvas.width, bh = baseCanvas.height;
-      const n = normFromEvent(ev, baseCanvas);
-      const x = n.x * bw, y = n.y * bh;
+      const rect = baseCanvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left); // css px
+      const y = (ev.clientY - rect.top);
+      const bw = rect.width, bh = rect.height; // use css px consistently
       const r = getRadiusPx();
+      debugDot(x, y);
       let hitIndex = -1;
       cfg.points.forEach((p,idx)=>{
         if (hitIndex!==-1) return;
@@ -270,8 +279,9 @@
       if (!cfg) return;
       const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i));
       if (!unresolved.length) return;
+      const rect = baseCanvas.getBoundingClientRect();
+      const bw = rect.width, bh = rect.height;
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
-      const bw = baseCanvas.width, bh = baseCanvas.height;
       const p = cfg.points[idx];
       const x = p.xNorm*bw, y = p.yNorm*bh; const R = getRadiusPx()*3;
       const ring = document.createElement('div');
@@ -310,20 +320,22 @@
     };
 
     // Interactions
-    baseCanvas.addEventListener('click', onClickCanvas);
-    hintBtn.onclick = doHint;
+    baseCanvas.addEventListener('click', onCanvasPress);
+    baseCanvas.addEventListener('pointerdown', onCanvasPress);
+    baseCanvas.addEventListener('mousedown', onCanvasPress);
+    hintBtnUnder.onclick = doHint;
     resetBtn.onclick = ()=>{ if(!cfg) return; score=0; scoreEl.textContent=0; found.clear(); foundEl.textContent=0; const rctx=revealCanvas.getContext('2d'); rctx.clearRect(0,0,revealCanvas.width,revealCanvas.height); resetBonus(); startTimers(); drawImages(); };
 
     // Start game: hide sidebar, badges, show HUD, start timers
     startBtn.onclick = ()=>{
       if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
       document.body.classList.add('playing');
-      startTimers();
-      drawImages();
+      // reflow then redraw to ensure correct sizing after layout change
+      requestAnimationFrame(()=>{ drawImages(); startTimers(); });
     };
 
     // Resize handling
-    window.addEventListener('resize', drawImages);
+    window.addEventListener('resize', ()=>{ drawImages(); });
 
     // Modal buttons
     closeModal.onclick = ()=> doneModal.style.display='none';
