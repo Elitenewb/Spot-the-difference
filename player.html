@@ -32,7 +32,7 @@
     .stack{position:relative;width:100%;height:100%}
     #modLeft{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill}
     #patchLayer{position:absolute;inset:0;pointer-events:none}
-    .patch{position:absolute;border-radius:50%;background-size:100% 100%;background-repeat:no-repeat;opacity:0;transition:opacity 180ms ease}
+    .patch{position:absolute;border-radius:50%;background-size:100% 100%;background-repeat:no-repeat;opacity:0;background-clip:content-box;overflow:hidden;transition:opacity 400ms ease-out}
     .patch.in{opacity:1}
 
     /* Right (reference) */
@@ -174,7 +174,7 @@
 
     // Click radius helpers
     const HINT_FACTOR = 8; // much larger, per request
-    const HIT_FUDGE = 1.15; // widen hit circle slightly to match perception
+    const HIT_FUDGE = 1.35; // widen hit circle slightly to match perception
 
     function imagesReady(){ return !!(modImgUrl && origImgUrl); }
 
@@ -191,12 +191,25 @@
 
     function rect(){ return stack.getBoundingClientRect(); }
 
+    
     function radiusPx(){
-      const r = rect(); const s = Math.min(r.width, r.height);
-      if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
-      if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
-        return (cfg.radius / Math.min(cfg.natural.w, cfg.natural.h)) * s;
+      const r = rect();
+      if (!cfg) return 24;
+      // Prefer normalized radius if present
+      if (cfg.radiusNorm != null) {
+        const s = Math.min(r.width, r.height);
+        return cfg.radiusNorm * s;
       }
+      // Scale pixel radius from creator by current render scale (width == height scale when aspect is locked)
+      if (cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
+        const scaleX = r.width / cfg.natural.w;
+        const scaleY = r.height / cfg.natural.h;
+        const scale = Math.min(scaleX, scaleY);
+        return cfg.radius * scale;
+      }
+      return 24;
+    }
+    
       return 24;
     }
 
