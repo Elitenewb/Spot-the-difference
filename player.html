@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Spot the Difference – Player</title>
   <style>
-    :root{--bg:#0f1220;--panel:#171a2b;--ink:#e9ecf1;--muted:#a7b0c0;--accent:#7bd4ff;--frame:#2a2f4a;--good:#53d769;--bad:#ff5c5c}
+    :root{--bg:#0f1220;--panel:#171a0b;--ink:#e9ecf1;--muted:#a7b0c0;--accent:#7bd4ff;--frame:#2a2f4a;--good:#53d769;--bad:#ff5c5c}
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;background:linear-gradient(180deg,#0f1220,#0b0e1a);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
@@ -28,10 +28,10 @@
     .frame{position:relative;border:3px solid var(--frame);border-radius:12px;overflow:hidden;background:#0a0d1b}
     .stack{position:relative;width:100%;height:100%}
     .layer{position:absolute;inset:0;display:block;width:100%;height:100%}
-    #origCanvas{z-index:1}
-    #modCanvas{z-index:2}
+    #origCanvas{z-index:1;pointer-events:none}
+    #modCanvas{z-index:2;touch-action:none}
 
-    #origRight{width:100%;height:100%;object-fit:fill;display:block}
+    #origRightCanvas{width:100%;height:100%;display:block}
 
     .badge{position:absolute;top:8px;left:8px;background:#000c;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22}
     body.playing .badge{display:none}
@@ -42,14 +42,27 @@
     .stats{display:flex;gap:10px;flex-wrap:wrap}
     .chip{background:#0e1327;border:1px solid #2b3152;border-radius:999px;padding:6px 10px;color:var(--muted)}
     .gain{background:#0a1a0f;border-color:#1f6f3b;color:#c7f7d1}
+    .loss{background:#1a0e0e;border-color:#6f2b2b;color:#ffd1d1}
+    #lastGain{min-width:5ch;text-align:center}
+    .num.narrow{min-width:0}
+    .fraction .num{min-width:0}
     .num{display:inline-block;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
 
-    .hintPulse{position:absolute;border:2px solid #fff;border-radius:50%;opacity:0;pointer-events:none;z-index:5}
+    @keyframes hintPulse { 0%,100% { opacity:0; transform:scale(1)} 50% { opacity:1; transform:scale(1.05)} }
+    .hintPulse{position:absolute;border:2px solid #fff;border-radius:50%;pointer-events:none;z-index:5;animation: hintPulse 1.6s ease 1}
 
-    .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center}
+    .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center;z-index:10000}
     .modal .inner{background:#0f142e;border:1px solid #2b3152;border-radius:16px;max-width:420px;width:92%;padding:20px}
     .modal h2{margin:0 0 12px}
     .modal .row{display:flex;justify-content:space-between;margin-top:10px}
+
+    /* Ready modal overrides */
+    #readyModal{background:#0f1220}
+    #readyModal .inner{
+      background:transparent;border:0;border-radius:0;max-width:none;width:100%;height:100%;padding:0;
+      display:flex;align-items:center;justify-content:center;text-align:center
+    }
+    #readyStartBtn{font-size:36px;padding:22px 32px;border-radius:16px}
 
     .hud{display:none;gap:12px;align-items:center;justify-content:center;padding:10px 18px;border-top:1px solid #23263d}
     body.playing .hud{display:flex}
@@ -58,16 +71,22 @@
     .under-left{display:none;justify-content:center;padding:10px}
     body.playing .under-left{display:flex}
     .btn{padding:10px 14px;border-radius:10px;border:1px solid #2b3152;background:#0e1122;color:var(--ink);cursor:pointer}
+
+    /* Diagnostics panel */
+    details.debug{margin-top:12px}
+    details.debug summary{cursor:pointer;color:var(--muted)}
+    body.modal-open{overflow:hidden}
+    pre.testlog{white-space:pre-wrap;background:#0e1327;border:1px solid #2b3152;border-radius:8px;padding:8px;color:#cfe3ff;max-height:160px;overflow:auto}
   </style>
 </head>
 <body>
   <header>
     <h1>Spot the Difference</h1>
     <div class="stats">
+      <div class="chip" id="lastGain" style="display:none">+0</div>
       <div class="chip">Total: <span id="score" class="num">0</span></div>
-      <div class="chip gain" id="lastGain" style="display:none">+0</div>
       <div class="chip">Time Bonus: <span id="bonus" class="num">1000</span></div>
-      <div class="chip">Found: <span id="found" class="num">0</span>/<span id="need" class="num">10</span></div>
+      <div class="chip">Found: <span class="fraction"><span id="found" class="num narrow">0</span>/<span id="need" class="num narrow">10</span></span></div>
     </div>
   </header>
   <main>
@@ -81,13 +100,23 @@
         <input id="cfgFile" type="file" accept="application/json" />
       </div>
       <div class="section row">
-        <button id="startBtn" class="primary">Start game</button>
+        <button id="startBtn" class="primary">Load game</button>
         <button id="resetBtn">Reset game</button>
       </div>
       <div class="section">
         <div class="bar"><div id="bonusFill" class="fill" style="width:100%"></div></div>
         <div class="hint" style="color:var(--muted);margin-top:6px">Each find = <b>200</b> + time bonus. Wrong click: <span style="color:var(--bad)">-25</span>.</div>
       </div>
+      <details class="debug">
+        <summary>Diagnostics ▸ pixel alignment test</summary>
+        <div class="section">
+          <button id="runDiag">Run diagnostic (loads synthetic images)</button>
+          <button id="openModalTest" style="margin-top:8px">Open finish modal (test)</button>
+          <button id="runUnitTests" style="margin-top:8px">Run unit tests</button>
+          <div id="diagMsg" style="margin-top:8px;color:var(--muted);"></div>
+          <pre id="testLog" class="testlog" style="display:none"></pre>
+        </div>
+      </details>
     </aside>
     <div class="game">
       <div class="card">
@@ -103,7 +132,7 @@
       <div class="card">
         <div class="frame" id="rightFrame">
           <span class="badge">Original (reference)</span>
-          <img id="origRight" alt="Original" />
+          <canvas id="origRightCanvas"></canvas>
         </div>
       </div>
     </div>
@@ -123,6 +152,13 @@
     </div>
   </div>
 
+  <!-- New: Ready-to-start blocking modal -->
+  <div id="readyModal" class="modal">
+    <div class="inner">
+      <button id="readyStartBtn" class="primary">START</button>
+    </div>
+  </div>
+
   <script>
     // Elements
     const modFile = document.getElementById('modFile');
@@ -131,14 +167,20 @@
     const startBtn = document.getElementById('startBtn');
     const hintBtnUnder = document.getElementById('hintBtnUnder');
     const resetBtn = document.getElementById('resetBtn');
+    const runDiagBtn = document.getElementById('runDiag');
+    const runUnitTestsBtn = document.getElementById('runUnitTests');
+    const diagMsg = document.getElementById('diagMsg');
+    const testLog = document.getElementById('testLog');
 
     const leftFrame = document.getElementById('leftFrame');
     const rightFrame = document.getElementById('rightFrame');
     const origCanvas = document.getElementById('origCanvas');
     const modCanvas = document.getElementById('modCanvas');
-    const octx = origCanvas.getContext('2d');
-    const mctx = modCanvas.getContext('2d');
-    const origRight = document.getElementById('origRight');
+    const rightCanvas = document.getElementById('origRightCanvas');
+    function ctx2d(el){ return el.getContext('2d', { colorSpace: 'srgb' }) || el.getContext('2d'); }
+    const octx = ctx2d(origCanvas);
+    const mctx = ctx2d(modCanvas);
+    const rctx = ctx2d(rightCanvas);
 
     const scoreEl = document.getElementById('score');
     const lastGainEl = document.getElementById('lastGain');
@@ -151,11 +193,12 @@
     const doneModal = document.getElementById('doneModal');
     const closeModal = document.getElementById('closeModal');
     const playAgain = document.getElementById('playAgain');
+    const readyModal = document.getElementById('readyModal');
+    const readyStartBtn = document.getElementById('readyStartBtn');
 
     // State
-    let modBmp = null; // ImageBitmap
-    let origBmp = null; // ImageBitmap
-    let origUrl = '';
+    let modBmp = null; // ImageBitmap | HTMLImageElement | HTMLCanvasElement
+    let origBmp = null; // ImageBitmap | HTMLImageElement | HTMLCanvasElement
     let cfg = null; // {radiusNorm, points[{xNorm,yNorm}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
@@ -173,37 +216,100 @@
     const HINT_FACTOR = 8;     // large hint ring
     const HIT_FUDGE   = 1.25;  // looser hit detection
 
+    // Testing aid: allow overriding rects in tests
+    let rectOverrideLeft = null;
+    let rectOverrideRight = null;
+
     function imagesReady(){ return !!(modBmp && origBmp); }
 
+    // -----------------------------
+    // Audio (Web Audio synth; swap to asset playback easily later)
+    // -----------------------------
+    let AC = null;
+    function getAC(){
+      if(!AC){ AC = new (window.AudioContext||window.webkitAudioContext)(); }
+      if(AC.state === 'suspended') { try{ AC.resume(); }catch(_){} }
+      return AC;
+    }
+    function tone(o){
+      o = o || {};
+      const freq   = ("freq" in o)   ? o.freq   : 440;
+      const type   = o.type || 'sine';
+      const dur    = ("dur" in o)    ? o.dur    : 0.12;
+      const gain   = ("gain" in o)   ? o.gain   : 0.22;
+      const attack = ("attack" in o) ? o.attack : 0.005;
+      const rel    = ("rel" in o)    ? o.rel    : 0.12;
+      const when   = ("when" in o)   ? o.when   : 0;
+      const ac = getAC();
+      const t0 = ac.currentTime + when;
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = type; osc.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(gain, t0 + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + Math.max(attack+0.01, rel));
+      osc.connect(g).connect(ac.destination);
+      osc.start(t0); osc.stop(t0 + dur + 0.05);
+    }
+    const sfx = {
+      correct(){ tone({freq:1046.5,dur:0.10,type:'sine',gain:0.18}); tone({freq:1318.5,dur:0.09,type:'sine',gain:0.16, when:0.06}); },
+      wrong(){ tone({freq:196,type:'square',dur:0.16,gain:0.2}); },
+      complete(){
+        const base=523.25; // C5
+        tone({freq:base, type:'triangle', dur:0.12, gain:0.18, when:0});
+        tone({freq:base*1.25, type:'triangle', dur:0.12, gain:0.18, when:0.08});
+        tone({freq:base*1.5, type:'triangle', dur:0.14, gain:0.18, when:0.16});
+      }
+    };
+
     async function loadBitmap(file){
-      const bmp = await createImageBitmap(file, { colorSpaceConversion:'none', premultiplyAlpha:'none' }).catch(()=>null);
-      const url = URL.createObjectURL(file);
-      return {bmp, url};
+      try{
+        const bmp = await createImageBitmap(file, { colorSpaceConversion: 'default' });
+        return { bmp };
+      }catch(e1){
+        try{
+          const bmp = await createImageBitmap(file);
+          return { bmp };
+        }catch(e2){
+          const url = URL.createObjectURL(file);
+          try{
+            const img = new Image();
+            img.decoding = 'async';
+            img.src = url;
+            await img.decode();
+            return { bmp: img };
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        }
+      }
     }
 
     function setAspect(){
-      const w = cfg?.natural?.w || modBmp?.width || 4;
-      const h = cfg?.natural?.h || modBmp?.height || 3;
+      const w = (cfg?.natural?.w) || (modBmp?.width) || (origBmp?.width) || 4;
+      const h = (cfg?.natural?.h) || (modBmp?.height) || (origBmp?.height) || 3;
       leftFrame.style.aspectRatio = `${w}/${h}`;
       rightFrame.style.aspectRatio = `${w}/${h}`;
     }
 
-    function cssRect(){ return modCanvas.getBoundingClientRect(); }
+    function cssRectLeft(){ return rectOverrideLeft || modCanvas.getBoundingClientRect(); }
+    function cssRectRight(){ return rectOverrideRight || rightCanvas.getBoundingClientRect(); }
 
     function sizeCanvases(){
-      const r = cssRect();
+      const rl = cssRectLeft();
+      const rr = cssRectRight();
       const dpr = Math.max(1, window.devicePixelRatio || 1);
-      for (const c of [origCanvas, modCanvas]){
-        c.width  = Math.max(1, Math.round(r.width * dpr));
-        c.height = Math.max(1, Math.round(r.height * dpr));
-      }
-      // draw using CSS pixels
-      octx.setTransform(dpr,0,0,dpr,0,0);
-      mctx.setTransform(dpr,0,0,dpr,0,0);
+      const dwl = Math.max(1, Math.round(rl.width * dpr));
+      const dhl = Math.max(1, Math.round(rl.height * dpr));
+      const dwr = Math.max(1, Math.round(rr.width * dpr));
+      const dhr = Math.max(1, Math.round(rr.height * dpr));
+      [origCanvas, modCanvas].forEach(c=>{ c.width = dwl; c.height = dhl; });
+      rightCanvas.width = dwr; rightCanvas.height = dhr;
+      [octx, mctx, rctx].forEach(ctx=>{ ctx.setTransform(dpr,0,0,dpr,0,0); ctx.imageSmoothingEnabled = true; try{ ctx.imageSmoothingQuality='high'; }catch(_){} });
     }
 
     function radiusPx(){
-      const r = cssRect();
+      const r = cssRectLeft();
       const s = Math.min(r.width, r.height);
       if (cfg && cfg.radiusNorm != null) return cfg.radiusNorm * s;
       if (cfg && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
@@ -212,13 +318,36 @@
       return 24;
     }
 
-    function drawBaseLayers(){
-      const r = cssRect();
-      octx.clearRect(0,0,r.width,r.height);
-      mctx.clearRect(0,0,r.width,r.height);
-      if (origBmp) octx.drawImage(origBmp, 0,0, r.width, r.height);
-      if (modBmp)  mctx.drawImage(modBmp,  0,0, r.width, r.height);
+    function drawLeftLayers(){
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      // ORIG underlay
+      octx.setTransform(1,0,0,1,0,0);
+      octx.clearRect(0,0,origCanvas.width,origCanvas.height);
+      octx.globalCompositeOperation='source-over';
+      octx.globalAlpha=1;
+      if (origBmp){ octx.drawImage(origBmp, 0,0, origCanvas.width, origCanvas.height); }
+      // MOD overlay
+      mctx.setTransform(1,0,0,1,0,0);
+      mctx.clearRect(0,0,modCanvas.width,modCanvas.height);
+      mctx.globalCompositeOperation='source-over';
+      mctx.globalAlpha=1;
+      if (modBmp){ mctx.drawImage(modBmp, 0,0, modCanvas.width, modCanvas.height); }
+      // return to CSS space
+      octx.setTransform(dpr,0,0,dpr,0,0);
+      mctx.setTransform(dpr,0,0,dpr,0,0);
     }
+
+    function drawRightLayer(){
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      rctx.setTransform(1,0,0,1,0,0);
+      rctx.clearRect(0,0,rightCanvas.width,rightCanvas.height);
+      rctx.globalCompositeOperation='source-over';
+      rctx.globalAlpha=1;
+      if (origBmp){ rctx.drawImage(origBmp, 0,0, rightCanvas.width, rightCanvas.height); }
+      rctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+
+    function drawBaseLayers(){ drawLeftLayers(); drawRightLayer(); }
 
     function eraseHole(cx, cy, R){
       mctx.save();
@@ -227,12 +356,11 @@
       mctx.arc(cx, cy, R, 0, Math.PI*2);
       mctx.fill();
       mctx.restore();
-      // Keep drawing into normal mode afterwards
       mctx.globalCompositeOperation = 'source-over';
     }
 
     function replayHoles(){
-      const r = cssRect();
+      const r = cssRectLeft();
       const R = radiusPx();
       for (const idx of found){
         const p = cfg.points[idx];
@@ -242,7 +370,7 @@
 
     // Animate: grow the cutout from 0 → R so it visibly reveals the original
     function animateErase(idx, done){
-      const r = cssRect();
+      const r = cssRectLeft();
       const p = cfg.points[idx];
       const cx = p.xNorm*r.width, cy = p.yNorm*r.height; const R = radiusPx();
       let i=0, steps=12;
@@ -254,9 +382,18 @@
       step();
     }
 
+    // --- Scoring helpers (source of truth for tests & UI) ---
+    function currentBonusValue(){
+      const n = parseInt(bonusEl.textContent, 10);
+      return Number.isFinite(n) ? Math.max(0, n) : 0;
+    }
+    function gainForFind(){
+      return 200 + currentBonusValue();
+    }
+
     function onPlayClick(ev){
       if (!cfg || !imagesReady()) return;
-      const r = cssRect();
+      const r = cssRectLeft();
       const x = ev.clientX - r.left; const y = ev.clientY - r.top;
       const R = radiusPx(); const Rhit = R * HIT_FUDGE;
       let hitIndex = -1;
@@ -268,25 +405,37 @@
       if (hitIndex === -1){ wrongClick(); return; }
       found.add(hitIndex);
       animateErase(hitIndex, ()=>{
-        const elapsed = performance.now() - bonusStart;
-        const steps = Math.floor(elapsed / BONUS_STEP_MS);
-        const currentBonus = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
-        const gain = 200 + currentBonus; score += gain; scoreEl.textContent = score; showGain(gain);
+        const gain = gainForFind();
+        score += gain; scoreEl.textContent = score; showGain(gain);
+        sfx.correct();
         foundEl.textContent = found.size; flashBorder(leftFrame,'good'); resetBonus();
         if (found.size >= (cfg.need || cfg.points.length)) finish();
       });
     }
 
+    // -----------------------------
     // UI & timers
+    // -----------------------------
+    let gainT1=0, gainT2=0;
     function showGain(val){
+      clearTimeout(gainT1); clearTimeout(gainT2);
       lastGainEl.textContent = (val>0?'+':'') + val;
+      lastGainEl.classList.remove('gain','loss');
+      lastGainEl.classList.add(val>=0 ? 'gain' : 'loss');
       lastGainEl.style.display = 'inline-block';
       lastGainEl.style.opacity = '1';
-      setTimeout(()=>{ lastGainEl.style.transition='opacity 600ms'; lastGainEl.style.opacity='0'; }, 50);
-      setTimeout(()=>{ lastGainEl.style.display='none'; lastGainEl.style.transition=''; }, 700);
+      lastGainEl.style.transition = '';
+      gainT1 = setTimeout(()=>{ lastGainEl.style.transition='opacity 300ms'; lastGainEl.style.opacity='0'; }, 1200);
+      gainT2 = setTimeout(()=>{ lastGainEl.style.display='none'; lastGainEl.style.transition=''; }, 1500);
     }
-    function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); }
+    function wrongClick(){ score = Math.max(0, score - 25); scoreEl.textContent = score; flashBorder(leftFrame,'bad'); showGain(-25); sfx.wrong(); }
     function flashBorder(el,kind){ el.style.boxShadow = kind==='bad' ? '0 0 0 3px #ff5c5c88 inset' : '0 0 0 3px #53d76988 inset'; setTimeout(()=> el.style.boxShadow='none', 200); }
+
+    // Pure helper (keeps template literals simple & testable)
+    function pctWidth(val, max){
+      const pct = Math.max(0, Math.min(100, (val/max)*100));
+      return `${pct}%`;
+    }
 
     function startTimers(){
       upStart = performance.now(); if (upTimerId) cancelAnimationFrame(upTimerId);
@@ -297,7 +446,7 @@
         const steps = Math.floor((now - bonusStart) / BONUS_STEP_MS);
         const b = Math.max(0, BONUS_MAX - steps * BONUS_STEP_VAL);
         if (bonusEl.textContent !== String(b)) bonusEl.textContent = b;
-        bonusFill.style.width = `${(b/BONUS_MAX)*100}%`;
+        bonusFill.style.width = pctWidth(b, BONUS_MAX);
         upTimerId = requestAnimationFrame(tick);
       };
       upTimerId = requestAnimationFrame(tick); resetBonus();
@@ -307,7 +456,7 @@
     function doHint(){
       if (!cfg) return;
       const unresolved = cfg.points.map((p,i)=> i).filter(i=> !found.has(i)); if (!unresolved.length) return;
-      const r = cssRect();
+      const r = cssRectLeft();
       const idx = unresolved[Math.floor(Math.random()*unresolved.length)];
       const p = cfg.points[idx];
       const x = p.xNorm*r.width, y = p.yNorm*r.height; const R = radiusPx()*HINT_FACTOR;
@@ -315,40 +464,170 @@
       ring.style.left = (x - R) + 'px'; ring.style.top = (y - R) + 'px';
       ring.style.width = (R*2)+'px'; ring.style.height = (R*2)+'px';
       leftFrame.appendChild(ring);
-      let flashes = 0; const blink = ()=>{ ring.style.transition='opacity 250ms ease'; ring.style.opacity = (ring.style.opacity==='1')?'0':'1'; };
-      const interval = setInterval(()=>{ flashes++; blink(); if (flashes>7){ clearInterval(interval); ring.remove(); } }, 200);
+      ring.addEventListener('animationend', ()=> ring.remove());
     }
 
-    // Loaders
-    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp} = await loadBitmap(f); modBmp=bmp; };
-    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp, url} = await loadBitmap(f); origBmp=bmp; origUrl=url; origRight.src=url; };
+    // Loaders (also trigger previews immediately)
+    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp} = await loadBitmap(f); modBmp=bmp; setAspect(); sizeCanvases(); drawBaseLayers(); };
+    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp} = await loadBitmap(f); origBmp=bmp; setAspect(); sizeCanvases(); drawBaseLayers(); };
     cfgFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ cfg=JSON.parse(r.result); resetState(); }catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f); };
 
     function resetState(){
       score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
       found = new Set(); foundEl.textContent = 0; needEl.textContent = cfg?.need || (cfg?.points? cfg.points.length : 10);
-      setAspect(); sizeCanvases(); drawBaseLayers(); // draw both images
+      setAspect(); sizeCanvases(); drawBaseLayers();
       resetBonus();
     }
 
-    // Start game
+    // Flow change: Load game (hide sidebar, show ready overlay; do NOT start timers)
     startBtn.onclick = ()=>{
       if (!cfg || !imagesReady()) { alert('Load both images and the config first.'); return; }
       setAspect();
       document.body.classList.add('playing');
-      requestAnimationFrame(()=>{ sizeCanvases(); drawBaseLayers(); startTimers(); });
+      requestAnimationFrame(()=>{ sizeCanvases(); drawBaseLayers(); });
+      // unlock audio on gesture
+      getAC();
+      readyModal.style.display='flex';
+      document.body.classList.add('modal-open');
+    };
+
+    // Ready → START
+    readyStartBtn.onclick = ()=>{
+      // close blocker, then begin timers
+      readyModal.style.display='none';
+      document.body.classList.remove('modal-open');
+      resetBonus();
+      startTimers();
     };
 
     // Interactions & resize
     modCanvas.addEventListener('click', onPlayClick);
     hintBtnUnder.onclick = doHint;
     resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
-    window.addEventListener('resize', ()=>{ if(!cfg) return; sizeCanvases(); drawBaseLayers(); replayHoles(); });
+    let resizeRAF=null;
+    window.addEventListener('resize', ()=>{
+      if(!cfg) return;
+      if (resizeRAF) cancelAnimationFrame(resizeRAF);
+      resizeRAF = requestAnimationFrame(()=>{ sizeCanvases(); drawBaseLayers(); replayHoles(); resizeRAF=null; });
+    });
 
     // Finish modal
-    function finish(){ cancelAnimationFrame(upTimerId); document.getElementById('sumScore').textContent = score; document.getElementById('sumTime').textContent = upTimerEl.textContent; doneModal.style.display='flex'; }
-    closeModal.onclick = ()=> doneModal.style.display='none';
-    playAgain.onclick = ()=>{ doneModal.style.display='none'; resetState(); startTimers(); };
+    function finish(){
+      cancelAnimationFrame(upTimerId);
+      document.getElementById('sumScore').textContent = score;
+      document.getElementById('sumTime').textContent = upTimerEl.textContent;
+      doneModal.style.display='flex';
+      document.body.classList.add('modal-open');
+      sfx.complete();
+    }
+    closeModal.onclick = ()=>{ doneModal.style.display='none'; document.body.classList.remove('modal-open'); };
+    playAgain.onclick = ()=>{ doneModal.style.display='none'; document.body.classList.remove('modal-open'); resetState(); startTimers(); };
+
+    // -----------------------------
+    // Diagnostics / test harness
+    // -----------------------------
+    function makeDiagCanvas(w,h){
+      w = (typeof w === 'number') ? w : 800;
+      h = (typeof h === 'number') ? h : 450;
+      const c = document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d');
+      // background checkerboard for sharpness
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const on = ((x>>3) ^ (y>>3)) & 1; // 8px checks
+          ctx.fillStyle = on ? '#3b4b6b' : '#26344f';
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+      // fine 1px lines
+      ctx.strokeStyle='rgba(255,255,255,0.6)';
+      for(let x=0;x<w;x+=20){ ctx.beginPath(); ctx.moveTo(x+0.5,0); ctx.lineTo(x+0.5,h); ctx.stroke(); }
+      for(let y=0;y<h;y+=20){ ctx.beginPath(); ctx.moveTo(0,y+0.5); ctx.lineTo(w,y+0.5); ctx.stroke(); }
+      // text
+      ctx.fillStyle='white'; ctx.font='24px system-ui,Segoe UI,Roboto,Arial'; ctx.fillText('DIAGNOSTIC PATTERN', 16, 34);
+      return c;
+    }
+
+    function runDiag(){
+      diagMsg.textContent = 'Generating synthetic test images…';
+      const w=900, h=506; // 16:9-ish but odd sizes to catch sampling
+      const pattern = makeDiagCanvas(w,h);
+      origBmp = pattern; modBmp = pattern; cfg = {
+        natural:{w,h},
+        radiusNorm: 0.05,
+        need: 6,
+        points: [
+          {xNorm:0.25,yNorm:0.25}, {xNorm:0.50,yNorm:0.25}, {xNorm:0.75,yNorm:0.25},
+          {xNorm:0.25,yNorm:0.75}, {xNorm:0.50,yNorm:0.75}, {xNorm:0.75,yNorm:0.75},
+        ]
+      };
+      setAspect(); sizeCanvases(); drawBaseLayers(); resetState();
+      diagMsg.textContent = 'Loaded synthetic images & config. Click Start → then click any grid intersections to test alignment.';
+    }
+
+    // Bind optional diagnostics buttons without optional chaining
+    const openModalTestBtn = document.getElementById('openModalTest');
+    if (openModalTestBtn) openModalTestBtn.addEventListener('click', ()=>{ score = 1234; upTimerEl.textContent = '01:23'; finish(); });
+    if (runDiagBtn) runDiagBtn.addEventListener('click', runDiag);
+
+    // -----------------------------
+    // Lightweight unit tests
+    // -----------------------------
+    function expect(name, cond, info=''){
+      if(!testLog) return;
+      if (cond) { testLog.textContent += `\nPASS: ${name}`; }
+      else { testLog.textContent += `\nFAIL: ${name}${info? ' → '+info: ''}`; }
+    }
+
+    function approx(a,b,eps){ eps = (typeof eps === 'number') ? eps : 0.001; return Math.abs(a-b) <= eps; }
+
+    function sampleRGBA(ctx, x, y){
+      const d = ctx.getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2], d[3]]; }
+
+    function runUnitTests(){
+      if(!testLog) return;
+      testLog.style.display='block';
+      testLog.textContent = 'Running unit tests…';
+      // Deterministic layout
+      rectOverrideLeft  = {left:0, top:0, width:1200, height:800};
+      rectOverrideRight = {left:0, top:0, width:1200, height:800};
+      const w=1200,h=800; const pattern = makeDiagCanvas(w,h);
+      origBmp = pattern; modBmp = pattern; cfg = { natural:{w,h}, radiusNorm:0.05, points:[{xNorm:0.25,yNorm:0.75}] };
+      setAspect(); sizeCanvases(); drawBaseLayers();
+      // radius math
+      const rpx = radiusPx(); expect('radiusPx uses min dimension * radiusNorm', approx(rpx, 0.05*800), `got ${rpx}`);
+      // normalized mapping
+      const rl = cssRectLeft(); const p = cfg.points[0];
+      const px = p.xNorm*rl.width, py = p.yNorm*rl.height; expect('normalized → CSS x', approx(px, 300), `got ${px}`); expect('normalized → CSS y', approx(py, 600), `got ${py}`);
+      // parity test: left underlay vs right reference should match at a few points
+      const dpr = Math.max(1, window.devicePixelRatio||1);
+      const sx = Math.floor((rl.width/2)*dpr), sy = Math.floor((rl.height/2)*dpr);
+      const a = sampleRGBA(octx, sx, sy).join(',');
+      const b = sampleRGBA(rctx, sx, sy).join(',');
+      expect('left underlay and right reference pixel parity (center)', a===b, `L=${a} R=${b}`);
+      // showGain behavior (class toggling & text)
+      showGain(200); expect('showGain(+): adds gain class', lastGainEl.classList.contains('gain') && !lastGainEl.classList.contains('loss'));
+      showGain(-25); expect('showGain(-): adds loss class', lastGainEl.classList.contains('loss'));
+      // bonus fill helper
+      expect('pctWidth 100%', pctWidth(1000, 1000)==='100%');
+      expect('pctWidth clamps 0%', pctWidth(-10, 1000)==='0%');
+      expect('pctWidth clamps 100%', pctWidth(2000, 1000)==='100%');
+      // new: Load game shows ready modal (requires cfg+images set above)
+      startBtn.onclick();
+      const rm = document.getElementById('readyModal');
+      expect('Load game sets playing', document.body.classList.contains('playing'));
+      expect('Ready modal is visible', rm && rm.style.display==='flex');
+      // scoring calc from UI bonus
+      bonusEl.textContent = '0'; expect('gainForFind at 0 bonus ⇒ 200', gainForFind()===200, `got ${gainForFind()}`);
+      bonusEl.textContent = '1000'; expect('gainForFind at 1000 bonus ⇒ 1200', gainForFind()===1200, `got ${gainForFind()}`);
+      bonusEl.textContent = '-50'; expect('gainForFind clamps negative bonus to 0', gainForFind()===200, `got ${gainForFind()}`);
+      // new: default args behavior for makeDiagCanvas
+      const cDefault = makeDiagCanvas();
+      expect('makeDiagCanvas default size 800x450', cDefault.width===800 && cDefault.height===450, `got ${cDefault.width}x${cDefault.height}`);
+      // cleanup overrides
+      rectOverrideLeft=null; rectOverrideRight=null; found.clear();
+    }
+
+    if (runUnitTestsBtn) runUnitTestsBtn.addEventListener('click', runUnitTests);
   </script>
 </body>
 </html>
