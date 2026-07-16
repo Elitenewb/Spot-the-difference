@@ -162,7 +162,11 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes("postToExtension('SPOT_DIFF_VERIFY_ANALYSIS'"));
   assert.ok(creator.includes('function annotatedRegionsDataUrl()'));
   assert.ok(creator.includes('xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center'));
-  assert.ok(creator.includes('visually verify that every rectangle actually overlaps'));
+  assert.ok(creator.includes('visually verify that every rectangle actually covers'));
+  assert.ok(creator.includes('exact pixel-change mask, not as a pointer identifying the student'));
+  assert.ok(creator.includes('targetCheck must be a specific sentence'));
+  assert.ok(creator.includes('requireTargetCheck&&targetCheck.length<24'));
+  assert.ok(creator.includes('hat or cap region was not verified against the top of the head'));
   assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, or reframe"));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
   assert.ok(adapter.includes("unavailable|unable|cannot|can't|could not|not available"));
