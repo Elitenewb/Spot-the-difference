@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>Spot the Difference</title>
+  <rect width="128" height="128" rx="27" fill="#111a35"/>
+  <rect x="10" y="10" width="108" height="108" rx="21" fill="#1d2d59"/>
+  <circle cx="58" cy="56" r="31" fill="#f6c64d"/>
+  <circle cx="58" cy="56" r="23" fill="#fff6d5"/>
+  <path d="M80 79l24 24" fill="none" stroke="#f6c64d" stroke-linecap="round" stroke-width="13"/>
+  <circle cx="48" cy="50" r="6" fill="#285ddd"/>
+  <circle cx="66" cy="64" r="6" fill="#ec5b78"/>
+  <path d="M62 42v10M57 47h10" stroke="#285ddd" stroke-linecap="round" stroke-width="3.5"/>
+</svg>

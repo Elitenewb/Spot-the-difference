@@ -15,6 +15,15 @@ test('extension permissions stay narrowly scoped', () => {
   assert.ok(creatorMatches.every(pattern => pattern.includes('/creator.html')));
 });
 
+test('extension popup opens the hosted creator instead of a standalone ChatGPT tab', () => {
+  const popup = fs.readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
+  const popupHtml = fs.readFileSync(new URL('../chrome-extension/popup.html', import.meta.url), 'utf8');
+  assert.ok(popup.includes("https://elitenewb.github.io/Spot-the-difference/index.html"));
+  assert.ok(popup.includes("https://elitenewb.github.io/Spot-the-difference/*"));
+  assert.ok(!popup.includes('openChatGpt'));
+  assert.match(popupHtml, /id="openSpotDiff">Open Spot the Difference<\/button>/);
+});
+
 test('creator bridge responds to ping and relays only allowed requests', async () => {
   const posted = [];
   const windowListeners = [];
