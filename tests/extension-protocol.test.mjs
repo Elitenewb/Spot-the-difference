@@ -70,7 +70,7 @@ test('message protocol names agree across creator and extension layers', () => {
   const creator = fs.readFileSync(new URL('../creator.js', import.meta.url), 'utf8');
   const bridge = fs.readFileSync(new URL('../chrome-extension/app-bridge.js', import.meta.url), 'utf8');
   const background = fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8');
-  for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE']) {
+  for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']) {
     assert.ok(creator.includes(type), `creator missing ${type}`);
     assert.ok(bridge.includes(type), `bridge missing ${type}`);
     assert.ok(background.includes(type), `background missing ${type}`);
@@ -98,6 +98,10 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(adapter.indexOf('await uploadImage(payload.imageDataUrl') < adapter.indexOf('await submitPrompt(payload.prompt'), 'an analysis prompt must be submitted only after its image upload completes');
   assert.ok(!adapter.includes("assistant: ['[data-message-author-role=\"assistant\"]', 'article"));
   assert.ok(background.includes('for (let attempt = 0; attempt < 2; attempt++)'));
+  assert.ok(background.includes('async function cancelJob(jobId, appTabId)'));
+  assert.ok(background.includes('chrome.tabs.onRemoved.addListener'));
+  assert.ok(creator.includes("postToExtension('SPOT_DIFF_CANCEL',{jobId})"));
+  assert.ok(creator.includes("window.addEventListener('pagehide'"));
   assert.ok(background.includes("chrome.storage.session.remove('chatTabId')"));
   assert.ok(background.includes("runInFreshChat(message, job, temporary = true)"));
   assert.ok(background.includes("false\n    );"), 'edit jobs should opt out of temporary chat mode');
@@ -119,6 +123,8 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creatorHtml.includes('Download the finished puzzle'));
   assert.ok(creatorHtml.includes('<summary>Advanced options</summary>'));
   assert.ok(creatorHtml.includes('id="aiProgressBar"'));
+  assert.ok(creatorHtml.includes('id="cancelAiBtn" class="danger"'));
+  assert.ok(creator.includes('els.cancelAiBtn.hidden=!state.aiBusy'));
   assert.ok(creatorHtml.includes('id="aiProgressText">0%</span>'));
   assert.ok(creatorHtml.includes('body.ai-simple #origCard{display:none}'));
   assert.ok(creator.includes("if(state.mode==='manual')for(const region of state.regions)"));

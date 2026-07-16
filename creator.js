@@ -295,6 +295,7 @@
     els.clearBtn.disabled=!state.regions.length||state.aiBusy;
     els.undoBtn.disabled=!state.regions.length||state.aiBusy;
     els.cancelAiBtn.disabled=!state.aiBusy;
+    els.cancelAiBtn.hidden=!state.aiBusy;
     els.manualTab.disabled=state.aiBusy;
     els.aiTab.disabled=state.aiBusy;
     els.aiOrigFile.disabled=state.aiBusy;
@@ -581,6 +582,8 @@
 
   function cancelAi(){
     if(!state.aiBusy)return;
+    const jobId=state.activeJobId;
+    postToExtension('SPOT_DIFF_CANCEL',{jobId});
     failAi('Current ChatGPT job cancelled. You can adjust the puzzle and retry.');
     state.workflowPhase='idle'; setAiProgress(0);
   }
@@ -645,6 +648,9 @@
   els.analyzeBtn.addEventListener('click',startAiWorkflow);
   els.generateBtn.addEventListener('click',startGeneration);
   els.cancelAiBtn.addEventListener('click',cancelAi);
+  window.addEventListener('pagehide',()=>{
+    if(state.aiBusy)postToExtension('SPOT_DIFF_CANCEL',{jobId:state.activeJobId});
+  });
   els.modFile.addEventListener('change',async event=>{ try{ if(event.target.files[0])await loadManualImage(event.target.files[0],'modified'); }catch(error){ alert(error.message); event.target.value=''; } });
   els.origFile.addEventListener('change',async event=>{ try{ if(event.target.files[0])await loadManualImage(event.target.files[0],'original'); }catch(error){ alert(error.message); event.target.value=''; } });
   els.aiOrigFile.addEventListener('change',async event=>{ try{ if(event.target.files[0])await loadAiOriginal(event.target.files[0]); }catch(error){ alert(error.message); event.target.value=''; } });

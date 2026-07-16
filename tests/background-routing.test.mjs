@@ -7,6 +7,7 @@ function loadBackgroundHarness() {
   const updates = [];
   const sentMessages = [];
   const updateListeners = new Set();
+  const removeListeners = new Set();
   const chrome = {
     storage: {
       session: {
@@ -20,6 +21,7 @@ function loadBackgroundHarness() {
         addListener(listener) { updateListeners.add(listener); },
         removeListener(listener) { updateListeners.delete(listener); }
       },
+      onRemoved: { addListener(listener) { removeListeners.add(listener); } },
       async update(tabId, options) {
         updates.push({ tabId, ...options });
         queueMicrotask(() => {
@@ -41,7 +43,7 @@ function loadBackgroundHarness() {
   const context = { chrome, setTimeout: fastSetTimeout, clearTimeout, queueMicrotask, fetch, Uint8Array, btoa };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8'), context);
-  return { context, updates, sentMessages };
+  return { context, updates, sentMessages, removeListeners };
 }
 
 test('analysis uses temporary chat while crop editing uses regular chat', async () => {
@@ -83,4 +85,13 @@ test('replacement analysis continues in the existing chat without opening a fres
   assert.equal(sentMessages[0].message.type, 'SD_CHATGPT_REPAIR_ANALYSIS');
   assert.equal(forwarded.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT');
   assert.equal(forwarded.at(-1).payload.repair, true);
+});
+
+test('closing the creator or ChatGPT tab cancels the active automation job', async () => {
+  const { context, removeListeners } = loadBackgroundHarness();
+  const cancelled = [];
+  context.cancelJob = async (jobId, appTabId) => { cancelled.push({ jobId, appTabId }); };
+  vm.runInContext("activeJobs.set(42, { jobId: 'stuck-job', appTabId: 5, kind: 'edit' })", context);
+  for (const listener of removeListeners) listener(42);
+  assert.deepEqual(cancelled, [{ jobId: 'stuck-job', appTabId: 5 }]);
 });

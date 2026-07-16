@@ -2,6 +2,8 @@
 
 const CHATGPT_URL = 'https://chatgpt.com/';
 const activeJobs = new Map();
+const cancelledJobIds = new Set();
+const intentionallyClosedTabs = new Set();
 
 function validText(value, max) { return typeof value === 'string' && value.length > 0 && value.length <= max; }
 function validImage(value) { return validText(value, 25_000_000) && /^data:image\/(?:png|jpeg|webp);base64,/i.test(value); }
@@ -45,7 +47,19 @@ async function getChatGptTab() {
 async function discardChatGptTab(tabId) {
   await chrome.storage.session.remove('chatTabId');
   activeJobs.delete(tabId);
+  intentionallyClosedTabs.add(tabId);
   try { await chrome.tabs.remove(tabId); } catch (_) {}
+}
+
+function jobWasCancelled(job) { return cancelledJobIds.has(job?.jobId); }
+
+async function cancelJob(jobId, appTabId) {
+  if (!validText(jobId, 120)) return;
+  cancelledJobIds.add(jobId);
+  const matchingTabs = [...activeJobs.entries()]
+    .filter(([, job]) => job.jobId === jobId && (!appTabId || job.appTabId === appTabId))
+    .map(([tabId]) => tabId);
+  await Promise.all(matchingTabs.map(tabId => discardChatGptTab(tabId)));
 }
 
 async function openFreshChat(tabId, temporary = true) {
@@ -72,14 +86,19 @@ async function sendToChatGpt(tabId, message) {
 async function runInFreshChat(message, job, temporary = true) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (jobWasCancelled(job)) throw new Error('Current ChatGPT job cancelled.');
     const tab = await getChatGptTab();
     try {
       await openFreshChat(tab.id, temporary);
+      if (jobWasCancelled(job)) { await discardChatGptTab(tab.id); throw new Error('Current ChatGPT job cancelled.'); }
       activeJobs.set(tab.id, job);
-      return await sendToChatGpt(tab.id, message);
+      const response = await sendToChatGpt(tab.id, message);
+      if (jobWasCancelled(job)) throw new Error('Current ChatGPT job cancelled.');
+      return response;
     } catch (error) {
       lastError = error;
       await discardChatGptTab(tab.id);
+      if (jobWasCancelled(job)) throw error;
     }
   }
   throw lastError || new Error('Could not connect to a fresh ChatGPT tab.');
@@ -92,6 +111,7 @@ async function forward(appTabId, type, payload) {
 
 async function runAnalysis(payload, appTabId) {
   try {
+    cancelledJobIds.delete(payload.jobId);
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: 'Opening a fresh ChatGPT analysis chat…', completed: 0, total: 1 });
     const response = await runInFreshChat(
       { type: 'SD_CHATGPT_ANALYZE', payload },
@@ -108,6 +128,7 @@ async function runAnalysis(payload, appTabId) {
 
 async function runRepairAnalysis(payload, appTabId) {
   try {
+    cancelledJobIds.delete(payload.jobId);
     const tab = await getChatGptTab();
     activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-repair' });
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: `Requesting ${payload.count} replacement suggestion${payload.count === 1 ? '' : 's'}…`, completed: 0, total: 1 });
@@ -124,6 +145,7 @@ async function runRepairAnalysis(payload, appTabId) {
 async function runEdit(payload, appTabId) {
   const { jobId, edit } = payload;
   try {
+    cancelledJobIds.delete(jobId);
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId, regionId: edit.regionId, status: 'editing', message: 'Opening a fresh ChatGPT edit chat…' });
     const response = await runInFreshChat(
       { type: 'SD_CHATGPT_EDIT', payload: { ...edit, jobId } },
@@ -172,6 +194,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     runAnalysis(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
     return true;
   }
+  if (message.type === 'SPOT_DIFF_CANCEL') {
+    cancelJob(message.payload?.jobId, sender.tab.id).finally(() => sendResponse({ cancelled: true }));
+    return true;
+  }
   if (message.type === 'SPOT_DIFF_REPAIR_ANALYSIS') {
     if (!validRepairPayload(message.payload)) return;
     runRepairAnalysis(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
@@ -181,5 +207,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!validEditPayload(message.payload)) return;
     runEdit(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
     return true;
+  }
+});
+
+chrome.tabs.onRemoved.addListener(tabId => {
+  if (intentionallyClosedTabs.has(tabId)) return;
+  const job = activeJobs.get(tabId);
+  if (job) {
+    cancelJob(job.jobId, job.appTabId);
+    return;
+  }
+  for (const activeJob of activeJobs.values()) {
+    if (activeJob.appTabId === tabId) cancelJob(activeJob.jobId, tabId);
   }
 });
