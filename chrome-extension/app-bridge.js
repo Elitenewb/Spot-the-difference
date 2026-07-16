@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const allowedTypes = new Set(['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_EDIT_ONE']);
+  const allowedTypes = new Set(['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE']);
   const returnedTypes = new Set(['SPOT_DIFF_ANALYSIS_RESULT', 'SPOT_DIFF_EDIT_PROGRESS', 'SPOT_DIFF_EDIT_RESULT', 'SPOT_DIFF_AI_PROGRESS', 'SPOT_DIFF_AI_ERROR']);
 
   function validText(value, max) { return typeof value === 'string' && value.length > 0 && value.length <= max; }
@@ -10,6 +10,9 @@
     if (!payload || !validText(payload.jobId, 120)) return false;
     if (type === 'SPOT_DIFF_ANALYZE') {
       return validImage(payload.imageDataUrl) && validText(payload.prompt, 12_000) && Number.isInteger(payload.count) && payload.count >= 1 && payload.count <= 30;
+    }
+    if (type === 'SPOT_DIFF_REPAIR_ANALYSIS') {
+      return validText(payload.prompt, 12_000) && Number.isInteger(payload.count) && payload.count >= 1 && payload.count <= 30;
     }
     const edit = payload.edit;
     return edit && validText(edit.regionId, 120) && validImage(edit.imageDataUrl) && validText(edit.prompt, 12_000);

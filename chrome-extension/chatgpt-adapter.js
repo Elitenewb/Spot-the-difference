@@ -195,6 +195,13 @@
     return waitForAnalysis(before);
   }
 
+  async function runRepairAnalysis(payload) {
+    const before = assistantMessages().length;
+    reportProgress(payload, 'submitted', 'Requesting replacement suggestions from ChatGPT…');
+    await submitPrompt(payload.prompt, payload, before);
+    return waitForAnalysis(before);
+  }
+
   async function runEdit(payload) {
     const before = assistantMessages().length;
     const beforeUrls = new Set([...document.images].map(image => image.src));
@@ -207,6 +214,10 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'SD_CHATGPT_ANALYZE') {
       runAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
+    if (message.type === 'SD_CHATGPT_REPAIR_ANALYSIS') {
+      runRepairAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
       return true;
     }
     if (message.type === 'SD_CHATGPT_EDIT') {

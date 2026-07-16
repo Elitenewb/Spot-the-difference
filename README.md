@@ -25,6 +25,12 @@ After changing any file in `chrome-extension/`, select **Reload** on the extensi
 
 The full image is uploaded to ChatGPT only for region analysis, which uses a temporary chat. ChatGPT does not offer its built-in image editor in temporary chats, so each image-editing request opens a fresh regular chat containing only one padded crop. Those edit chats can appear in your ChatGPT history. Returned crops are resized to their original crop geometry, clipped to the selected rectangle, feathered at the edges, and composited on a canvas with the original image dimensions.
 
+Region suggestions are validated before they enter the creator. If ChatGPT returns an undersized, out-of-bounds, oversized, or substantially overlapping rectangle, the creator keeps every valid suggestion and asks for only the missing replacements in the same analysis chat. The rejection reasons and accepted rectangles are included so the replacements can correct the validation issue without duplicating existing targets.
+
+Suggestion prompts favor additions and replacements that are noticeable on close inspection while remaining believable in the scene. Color-only edits are capped at two per set of ten; excess color suggestions are rejected and replaced through the same repair loop.
+
+AI mode presents a three-step creator workflow: upload one photo, generate the complete puzzle, then download the modified PNG and config JSON together. Validated suggestions proceed directly into crop generation without an approval step. Region editing, retry controls, individual downloads, import tools, and diagnostics remain available under Advanced options. When people are present, prompts can include occasional harmless visual jokes involving clothing, accessories, or cleanly omitted small features while explicitly avoiding injury, distress, offensive content, or grotesque results.
+
 To play, open `player.html`, load the modified image, original image, and exported JSON, then select **Load game**.
 
 Both images must use the same pixel dimensions. Puzzle regions are stored as normalized coordinates, so they stay aligned when the game is resized.

@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 function loadBackgroundHarness() {
   const updates = [];
+  const sentMessages = [];
   const updateListeners = new Set();
   const chrome = {
     storage: {
@@ -29,7 +30,7 @@ function loadBackgroundHarness() {
       async create() { return { id: 77 }; },
       async get(tabId) { return { id: tabId }; },
       async remove() {},
-      async sendMessage() { return { ok: true, regions: [] }; }
+      async sendMessage(tabId, message) { sentMessages.push({ tabId, message }); return { ok: true, regions: [] }; }
     },
     runtime: { onMessage: { addListener() {} } }
   };
@@ -40,7 +41,7 @@ function loadBackgroundHarness() {
   const context = { chrome, setTimeout: fastSetTimeout, clearTimeout, queueMicrotask, fetch, Uint8Array, btoa };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8'), context);
-  return { context, updates };
+  return { context, updates, sentMessages };
 }
 
 test('analysis uses temporary chat while crop editing uses regular chat', async () => {
@@ -68,4 +69,18 @@ test('fresh-chat runner retries once after losing its ChatGPT tab', async () => 
   );
   assert.equal(result.ok, true);
   assert.equal(sends, 16);
+});
+
+test('replacement analysis continues in the existing chat without opening a fresh one', async () => {
+  const { context, updates, sentMessages } = loadBackgroundHarness();
+  context.chrome.storage.session.get = async () => ({ chatTabId: 42 });
+  const forwarded = [];
+  context.forward = async (_tabId, type, payload) => { forwarded.push({ type, payload }); };
+  await context.runRepairAnalysis({ jobId: 'repair-job', count: 1, prompt: 'Return one replacement region.' }, 5);
+  assert.equal(updates.length, 0, 'repair must not navigate away from the existing analysis conversation');
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].tabId, 42);
+  assert.equal(sentMessages[0].message.type, 'SD_CHATGPT_REPAIR_ANALYSIS');
+  assert.equal(forwarded.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT');
+  assert.equal(forwarded.at(-1).payload.repair, true);
 });

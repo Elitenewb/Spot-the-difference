@@ -6,10 +6,11 @@
     manualTab:$('manualTab'), aiTab:$('aiTab'), manualPanel:$('manualPanel'), aiPanel:$('aiPanel'),
     modFile:$('modFile'), origFile:$('origFile'), aiOrigFile:$('aiOrigFile'), modCanvas:$('modCanvas'), origCanvas:$('origCanvas'),
     modFrame:$('modFrame'), origFrame:$('origFrame'), need:$('need'), regionList:$('regionList'), regionCount:$('regionCount'),
-    exportBtn:$('exportBtn'), downloadImageBtn:$('downloadImageBtn'), downloadBothBtn:$('downloadBothBtn'), importBtn:$('importBtn'), importFile:$('importFile'),
+    exportBtn:$('exportBtn'), downloadImageBtn:$('downloadImageBtn'), downloadBothBtn:$('downloadBothBtn'), downloadReadyBtn:$('downloadReadyBtn'), importBtn:$('importBtn'), importFile:$('importFile'),
     clearBtn:$('clearPoints'), undoBtn:$('undoPoint'), analyzeBtn:$('analyzeBtn'), generateBtn:$('generateBtn'), cancelAiBtn:$('cancelAiBtn'),
     checkExtensionBtn:$('checkExtensionBtn'), extensionStatus:$('extensionStatus'), aiRunStatus:$('aiRunStatus'), aiProgress:$('aiProgress'),
-    patchUpload:$('patchUpload'), modBadge:$('modBadge'), diagnostics:$('creatorDiagnostics'),
+    patchUpload:$('patchUpload'), modBadge:$('modBadge'), diagnostics:$('creatorDiagnostics'), aiAdvanced:$('aiAdvanced'),
+    uploadStep:$('uploadStep'), generateStep:$('generateStep'), downloadStep:$('downloadStep'),
     runDiagnostics:$('runCreatorDiagnostics'), loadClassroomFixture:$('loadClassroomFixture'), testLog:$('creatorTestLog')
   };
 
@@ -17,7 +18,7 @@
     mode:'manual', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null
+    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -49,6 +50,8 @@
     els.aiTab.setAttribute('aria-selected',String(!manual));
     els.manualPanel.hidden=!manual;
     els.aiPanel.hidden=manual;
+    document.body.classList.toggle('ai-simple',!manual);
+    document.body.classList.toggle('advanced-open',!manual&&els.aiAdvanced.open);
     els.modBadge.textContent=manual?'Modified — drag to mark a region':'AI preview — drag to add or adjust the region set';
     updateControls();
     if(!manual) pingExtension();
@@ -57,6 +60,7 @@
   function setExtensionStatus(kind,message){
     els.extensionStatus.className=`status ${kind||''}`.trim();
     els.extensionStatus.lastElementChild.textContent=message;
+    els.checkExtensionBtn.hidden=kind!=='error';
   }
 
   function imageFromDataUrl(dataUrl){
@@ -105,6 +109,9 @@
     initializeWorkCanvasFromModified();
     fitCanvasSize();
     updateRegionList();
+    els.aiProgress.style.width='0%';
+    els.aiRunStatus.textContent='Photo ready. Click Generate puzzle.';
+    updateControls();
   }
 
   async function loadDebugClassroomFixture(){
@@ -213,7 +220,7 @@
     state.dragStart=null; state.dragCurrent=null; updateRegionList(); draw();
   }
 
-  function defaultInstruction(){ return 'Make one subtle, realistic change inside the selected area. Preserve lighting, perspective, texture, and everything outside the target.'; }
+  function defaultInstruction(){ return 'Make one clear but natural-looking addition or replacement inside the selected area. Preserve lighting, perspective, texture, and everything outside the target.'; }
 
   function validRegion(region){
     return ['xNorm','yNorm','wNorm','hNorm'].every(key=>Number.isFinite(region[key]))&&region.wNorm>.006&&region.hNorm>.006&&region.xNorm>=0&&region.yNorm>=0&&region.xNorm+region.wNorm<=1&&region.yNorm+region.hNorm<=1;
@@ -257,11 +264,23 @@
     const hasImages=!!(state.originalImage&&state.modifiedImage&&state.naturalW);
     const instructionsReady=state.regions.every(region=>String(region.instruction||'').trim().length>5);
     const aiReady=state.mode==='ai'&&state.extensionConnected&&!!state.originalImage&&!state.aiBusy;
-    els.analyzeBtn.disabled=!aiReady;
+    const allEditsDone=countMatches&&state.regions.length>0&&state.regions.every(region=>region.status==='done');
+    els.uploadStep.classList.toggle('done',!!state.originalImage);
+    els.generateStep.classList.toggle('done',allEditsDone);
+    els.downloadStep.classList.toggle('done',allEditsDone);
+    if(state.aiBusy)els.analyzeBtn.textContent='Generating…';
+    else if(allEditsDone)els.analyzeBtn.textContent='Puzzle ready';
+    else if(!state.originalImage)els.analyzeBtn.textContent='Upload a photo first';
+    else if(!state.extensionConnected)els.analyzeBtn.textContent='Waiting for connection';
+    else if(state.regions.length===expectedCount())els.analyzeBtn.textContent='Continue generation';
+    else els.analyzeBtn.textContent='Generate puzzle';
+    els.analyzeBtn.disabled=!aiReady||allEditsDone;
     els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regions.some(region=>region.status!=='done'));
     els.exportBtn.disabled=!(hasImages&&countMatches);
     els.downloadImageBtn.disabled=!hasImages;
     els.downloadBothBtn.disabled=!(hasImages&&countMatches);
+    els.downloadReadyBtn.disabled=!allEditsDone;
+    els.downloadReadyBtn.textContent=allEditsDone?'Download image + config':'Waiting for generation';
     els.clearBtn.disabled=!state.regions.length||state.aiBusy;
     els.undoBtn.disabled=!state.regions.length||state.aiBusy;
     els.cancelAiBtn.disabled=!state.aiBusy;
@@ -364,7 +383,7 @@
   }
 
   function analysisPrompt(){
-    return `You are planning a classroom spot-the-difference puzzle. Inspect this full image and choose exactly ${expectedCount()} distinct, subtle, visually meaningful details that can each be edited independently. Favor small objects or features such as logos, short words, lines, eyes, glasses, laces, buttons, colors, or removable background details. Avoid faces unless changing a tiny non-identity detail. Avoid overlapping regions, image borders, large areas, and changes that would alter the global composition. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1 and an instruction string describing one specific realistic add/remove/color/detail change. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Each rectangle must tightly enclose its target and generally use less than 12% of the image area.`;
+    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this full image and choose exactly ${expectedCount()} distinct, visually meaningful details that can each be edited independently. Make the differences clear on close inspection but still natural, believable, and not awkward or immediately obvious. When people are visible, prioritize people, their clothes, and accessories for roughly half the set. Include an occasional harmless visual joke when it suits the image: for example cleanly omit one eyebrow, a mouth, one eye, one visible finger, a glasses lens, a shoelace, a pocket, a button, or a small clothing feature. These jokes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Do not alter a person's identity or body shape. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions, such as adding a small plausible accessory, replacing a symbol or short word, changing an object's shape or pattern, or swapping one clothing detail for another. Use removals sparingly except for one or two playful omissions. Do not rely on tiny marks or extremely subtle changes. Use no more than 2 color-only changes in a set of 10. Avoid overlapping regions, image borders, large areas, and changes that would alter the global composition. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Every rectangle must have wNorm and hNorm greater than 0.006; use at least 0.008 for each dimension to leave a safety margin. Each rectangle must tightly enclose its target and use less than 15% of the image area.`;
   }
 
   function analysisImageDataUrl(){
@@ -414,19 +433,62 @@
     els.testLog.textContent=results.join('\n');
   }
 
-  function normalizeSuggestedRegions(raw){
+  function normalizeChangeType(item,instruction){
+    const supplied=String(item.changeType||item.type||'').toLowerCase().trim();
+    const colorOnly=/\b(?:recolor|change (?:the )?(?:color|colour)|change .{0,35} to (?:red|blue|green|yellow|orange|purple|pink|black|white|brown|gray|grey))\b/i.test(instruction)&&!/\b(?:add|attach|insert|replace|swap|substitute|remove|erase|delete)\b/i.test(instruction);
+    if(colorOnly)return 'color';
+    if(['add','replace','remove','color','detail'].includes(supplied))return supplied;
+    if(/\b(?:add|attach|insert|draw|give|put)\b/i.test(instruction))return 'add';
+    if(/\b(?:replace|swap|substitute|turn\s+.+\s+into)\b/i.test(instruction))return 'replace';
+    if(/\b(?:remove|erase|delete|take away)\b/i.test(instruction))return 'remove';
+    if(/\b(?:recolor|change (?:the )?(?:color|colour))\b/i.test(instruction))return 'color';
+    return 'detail';
+  }
+
+  function validateSuggestedRegions(raw,accepted=[]){
     const items=Array.isArray(raw)?raw:Array.isArray(raw?.regions)?raw.regions:[];
-    const normalized=[];
-    for(const item of items){
+    const normalized=[...accepted],rejected=[];
+    for(const [index,item] of items.entries()){
       const values=[item.xNorm,item.yNorm,item.wNorm,item.hNorm].map(Number);
       const largest=Math.max(...values);
       const scale=largest>1?(largest<=100?100:1000):1;
-      const region={id:uid(),xNorm:values[0]/scale,yNorm:values[1]/scale,wNorm:values[2]/scale,hNorm:values[3]/scale,instruction:String(item.instruction||item.prompt||defaultInstruction()),status:'pending',source:'chatgpt'};
-      const overlaps=normalized.some(existing=>regionOverlap(existing,region)>.2);
-      if(validRegion(region)&&region.wNorm*region.hNorm<.15&&!overlaps&&normalized.length<expectedCount()) normalized.push(region);
+      const instruction=String(item.instruction||item.prompt||defaultInstruction());
+      const region={id:uid(),xNorm:values[0]/scale,yNorm:values[1]/scale,wNorm:values[2]/scale,hNorm:values[3]/scale,instruction,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
+      let reason='';
+      if(!values.every(Number.isFinite))reason='coordinates must all be numeric';
+      else if(region.wNorm<=.006)reason=`width ${region.wNorm.toFixed(4)} is not greater than 0.006`;
+      else if(region.hNorm<=.006)reason=`height ${region.hNorm.toFixed(4)} is not greater than 0.006`;
+      else if(region.xNorm<0||region.yNorm<0||region.xNorm+region.wNorm>1||region.yNorm+region.hNorm>1)reason='rectangle extends outside the image';
+      else if(region.wNorm*region.hNorm>=.15)reason='rectangle covers 15% or more of the image';
+      else if(normalized.some(existing=>regionOverlap(existing,region)>.2))reason='rectangle overlaps an accepted suggestion by more than 20%';
+      else if(region.changeType==='color'&&normalized.filter(existing=>existing.changeType==='color').length>=2)reason='the set already contains the maximum of two color-only changes';
+      else if(normalized.length>=expectedCount())reason='more suggestions were returned than requested';
+      if(reason)rejected.push({number:index+1,reason,instruction:region.instruction});
+      else normalized.push(region);
     }
-    if(normalized.length!==expectedCount()) throw new Error(`ChatGPT returned ${normalized.length} valid regions; expected ${expectedCount()}. Try analysis again.`);
-    return normalized;
+    return {accepted:normalized,rejected};
+  }
+
+  function repairAnalysisPrompt(missing,accepted,rejected){
+    const acceptedJson=accepted.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction})=>({xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
+    const reasons=rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')||'The response did not contain enough usable regions.';
+    const colorSlots=Math.max(0,2-accepted.filter(region=>region.changeType==='color').length);
+    return `Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only. Favor meaningful additions and replacements that are clear on close inspection but natural and believable. When people are visible, prefer their clothes, accessories, or an occasional harmless visual joke such as a cleanly omitted eyebrow, mouth, eye, visible finger, glasses lens, shoelace, pocket, or button. It must look playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like, with no wound, gore, distress, or damaged skin. Do not propose a tiny mark or an extremely subtle change. At most ${colorSlots} of these replacements may be color-only. Include changeType as add, replace, remove, color, or detail; use color only for a mere recoloring. Each replacement must identify a new detail that does not overlap any accepted rectangle by more than 20%. Every xNorm, yNorm, wNorm, and hNorm must be numeric from 0 to 1. Both wNorm and hNorm must be greater than 0.006; use at least 0.008 for safety. Each rectangle must stay inside the image and cover less than 15% of it. Do not repeat any accepted target. Accepted regions to avoid: ${JSON.stringify(acceptedJson)}.`;
+  }
+
+  function requestMissingRegions(validation){
+    state.regions=validation.accepted;
+    const missing=expectedCount()-state.regions.length;
+    if(missing<=0)return false;
+    if(state.analysisRepairAttempts>=2)throw new Error(`Received ${expectedCount()} or more suggestions, but only ${state.regions.length} passed validation after two replacement attempts. ${validation.rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')}`);
+    state.analysisRepairAttempts++;
+    const details=validation.rejected.map(item=>`#${item.number} ${item.reason}`).join('; ');
+    setExtensionStatus('busy',`Accepted ${state.regions.length} of ${expectedCount()}; requesting ${missing} replacement${missing===1?'':'s'}…`);
+    els.aiRunStatus.textContent=`Rejected ${validation.rejected.length}: ${details}. Requesting ${missing} replacement${missing===1?'':'s'}…`;
+    updateRegionList(); draw();
+    armJobTimer(240000,`Replacement analysis ${state.analysisRepairAttempts}`);
+    postToExtension('SPOT_DIFF_REPAIR_ANALYSIS',{jobId:state.activeJobId,count:missing,prompt:repairAnalysisPrompt(missing,state.regions,validation.rejected)});
+    return true;
   }
 
   function regionOverlap(a,b){
@@ -440,8 +502,10 @@
   async function startAnalysis(){
     if(!state.originalDataUrl||state.aiBusy)return;
     state.aiBusy=true; state.activeJobId=uid('analysis');
+    state.analysisRepairAttempts=0;
     setExtensionStatus('busy','ChatGPT is inspecting the image…');
-    els.aiRunStatus.textContent='Waiting for ten region suggestions…'; updateControls();
+    els.aiProgress.style.width='4%';
+    els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
     armJobTimer(240000,'Region analysis');
     postToExtension('SPOT_DIFF_ANALYZE',{jobId:state.activeJobId,imageDataUrl:analysisImageDataUrl(),count:expectedCount(),prompt:analysisPrompt()});
   }
@@ -449,7 +513,14 @@
   function editPrompt(region,geometry,index){
     const left=Math.round(geometry.targetX/geometry.cropW*100),top=Math.round(geometry.targetY/geometry.cropH*100);
     const right=Math.round((geometry.targetX+geometry.targetW)/geometry.cropW*100),bottom=Math.round((geometry.targetY+geometry.targetH)/geometry.cropH*100);
-    return `Edit this crop for a classroom spot-the-difference puzzle. ${region.instruction.trim()} Make the change seamless and realistic. Preserve the crop's exact viewpoint, lighting, texture, color profile, sharpness, and all unrelated details. The target is approximately ${left}%–${right}% across and ${top}%–${bottom}% down; change only that target. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited image only, keeping the same aspect ratio. This is edit ${index+1} of ${state.regions.length}.`;
+    return `Edit this crop for a fun classroom spot-the-difference puzzle. ${region.instruction.trim()} Make the change seamless, believable, and gently amusing when the instruction is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact viewpoint, lighting, texture, color profile, sharpness, and all unrelated details. The target is approximately ${left}%–${right}% across and ${top}%–${bottom}% down; change only that target. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited image only, keeping the same aspect ratio. This is edit ${index+1} of ${state.regions.length}.`;
+  }
+
+  function startAiWorkflow(){
+    if(state.aiBusy)return;
+    const pending=state.regions.filter(region=>region.status!=='done');
+    if(state.regions.length===expectedCount()&&pending.length)startEditQueue(pending);
+    else startAnalysis();
   }
 
   function startGeneration(){
@@ -477,11 +548,11 @@
     const edit=state.editQueue[0];
     if(!edit){
       clearJobTimer(); state.aiBusy=false; els.aiProgress.style.width='100%'; setExtensionStatus('connected','Edit queue complete');
-      els.aiRunStatus.textContent='All returned patches are composited. Inspect the result before exporting.'; updateRegionList(); updateControls();
+      els.aiRunStatus.textContent='Puzzle complete. Download both files in step 3.'; updateRegionList(); updateControls();
       return;
     }
     const region=state.regions.find(item=>item.id===edit.regionId); if(region)region.status='editing';
-    els.aiRunStatus.textContent=`Editing ${state.editCompleted+1} of ${state.editTotal}…`;
+    els.aiRunStatus.textContent=`Step 2 of 2: creating difference ${state.editCompleted+1} of ${state.editTotal}…`;
     updateRegionList();
     armJobTimer(360000,`Edit ${state.editCompleted+1}`);
     postToExtension('SPOT_DIFF_EDIT_ONE',{jobId:state.activeJobId,edit});
@@ -504,16 +575,19 @@
     if(event.source!==window||event.data?.source!=='spot-diff-extension')return;
     const {type,payload}=event.data;
     if(type==='SPOT_DIFF_EXTENSION_PONG'){
-      state.extensionConnected=true; setExtensionStatus('connected','AI Bridge extension connected'); updateControls();
+      state.extensionConnected=true; setExtensionStatus('connected','Ready'); updateControls();
     }
     if(type==='SPOT_DIFF_ANALYSIS_RESULT'&&payload?.jobId===state.activeJobId){
       try{
         clearJobTimer();
-        state.regions=normalizeSuggestedRegions(payload.regions);
+        const validation=validateSuggestedRegions(payload.regions,payload.repair?state.regions:[]);
+        if(requestMissingRegions(validation))return;
+        state.regions=validation.accepted.slice(0,expectedCount());
         state.appliedPatches.clear(); state.aiBusy=false;
-        setExtensionStatus('connected','Ten suggestions received');
-        els.aiRunStatus.textContent='Review rectangles and instructions, then generate the edits.';
+        setExtensionStatus('connected',`${state.regions.length} differences selected`);
+        els.aiRunStatus.textContent='Differences selected. Starting image edits automatically…';
         updateRegionList(); draw();
+        startEditQueue(state.regions.filter(region=>region.status!=='done'));
       }catch(error){ failAi(error.message); }
     }
     if(type==='SPOT_DIFF_AI_PROGRESS'&&payload?.jobId===state.activeJobId){
@@ -548,7 +622,7 @@
   els.manualTab.addEventListener('click',()=>setMode('manual'));
   els.aiTab.addEventListener('click',()=>setMode('ai'));
   els.checkExtensionBtn.addEventListener('click',pingExtension);
-  els.analyzeBtn.addEventListener('click',startAnalysis);
+  els.analyzeBtn.addEventListener('click',startAiWorkflow);
   els.generateBtn.addEventListener('click',startGeneration);
   els.cancelAiBtn.addEventListener('click',cancelAi);
   els.modFile.addEventListener('change',async event=>{ try{ if(event.target.files[0])await loadManualImage(event.target.files[0],'modified'); }catch(error){ alert(error.message); event.target.value=''; } });
@@ -560,6 +634,8 @@
   els.exportBtn.addEventListener('click',downloadConfig);
   els.downloadImageBtn.addEventListener('click',downloadModified);
   els.downloadBothBtn.addEventListener('click',()=>{ downloadModified(); setTimeout(downloadConfig,250); });
+  els.downloadReadyBtn.addEventListener('click',()=>{ downloadModified(); setTimeout(downloadConfig,250); });
+  els.aiAdvanced.addEventListener('toggle',()=>document.body.classList.toggle('advanced-open',state.mode==='ai'&&els.aiAdvanced.open));
   els.importBtn.addEventListener('click',()=>els.importFile.click());
   els.importFile.addEventListener('change',async event=>{
     const file=event.target.files[0]; if(!file)return;

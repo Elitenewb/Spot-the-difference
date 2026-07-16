@@ -8,6 +8,9 @@ function validImage(value) { return validText(value, 25_000_000) && /^data:image
 function validAnalysisPayload(payload) {
   return payload && validText(payload.jobId, 120) && validImage(payload.imageDataUrl) && validText(payload.prompt, 12_000) && Number.isInteger(payload.count) && payload.count >= 1 && payload.count <= 30;
 }
+function validRepairPayload(payload) {
+  return payload && validText(payload.jobId, 120) && validText(payload.prompt, 12_000) && Number.isInteger(payload.count) && payload.count >= 1 && payload.count <= 30;
+}
 function validEditPayload(payload) {
   const edit = payload?.edit;
   return validText(payload?.jobId, 120) && edit && validText(edit.regionId, 120) && validImage(edit.imageDataUrl) && validText(edit.prompt, 12_000);
@@ -103,6 +106,21 @@ async function runAnalysis(payload, appTabId) {
   }
 }
 
+async function runRepairAnalysis(payload, appTabId) {
+  try {
+    const tab = await getChatGptTab();
+    activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-repair' });
+    await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: `Requesting ${payload.count} replacement suggestion${payload.count === 1 ? '' : 's'}…`, completed: 0, total: 1 });
+    const response = await sendToChatGpt(tab.id, { type: 'SD_CHATGPT_REPAIR_ANALYSIS', payload });
+    if (!response?.ok) throw new Error(response?.error || 'ChatGPT replacement analysis did not return a result.');
+    await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions, repair: true });
+  } catch (error) {
+    await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
+  } finally {
+    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId) activeJobs.delete(tabId);
+  }
+}
+
 async function runEdit(payload, appTabId) {
   const { jobId, edit } = payload;
   try {
@@ -152,6 +170,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'SPOT_DIFF_ANALYZE') {
     if (!validAnalysisPayload(message.payload)) return;
     runAnalysis(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
+    return true;
+  }
+  if (message.type === 'SPOT_DIFF_REPAIR_ANALYSIS') {
+    if (!validRepairPayload(message.payload)) return;
+    runRepairAnalysis(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
     return true;
   }
   if (message.type === 'SPOT_DIFF_EDIT_ONE') {
