@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 function loadBackgroundHarness() {
   const updates = [];
+  const creations = [];
   const sentMessages = [];
   const updateListeners = new Set();
   const removeListeners = new Set();
@@ -29,7 +30,7 @@ function loadBackgroundHarness() {
         });
         return { id: tabId, ...options };
       },
-      async create() { return { id: 77 }; },
+      async create(options) { creations.push(options); return { id: 77, ...options }; },
       async get(tabId) { return { id: tabId }; },
       async remove() {},
       async sendMessage(tabId, message) { sentMessages.push({ tabId, message }); return { ok: true, regions: [] }; }
@@ -43,7 +44,7 @@ function loadBackgroundHarness() {
   const context = { chrome, setTimeout: fastSetTimeout, clearTimeout, queueMicrotask, fetch, Uint8Array, btoa };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8'), context);
-  return { context, updates, sentMessages, removeListeners };
+  return { context, updates, creations, sentMessages, removeListeners };
 }
 
 test('analysis uses temporary chat while crop editing uses regular chat', async () => {
@@ -54,6 +55,15 @@ test('analysis uses temporary chat while crop editing uses regular chat', async 
   assert.doesNotMatch(updates[1].url, /temporary-chat=true/);
   assert.match(updates[0].url, /spotJob=/);
   assert.match(updates[1].url, /spotJob=/);
+  assert.equal(updates[0].active, false);
+  assert.equal(updates[1].active, false);
+});
+
+test('new ChatGPT automation tabs open behind the creator', async () => {
+  const { context, creations } = loadBackgroundHarness();
+  await context.getChatGptTab();
+  assert.equal(creations.length, 1);
+  assert.equal(creations[0].active, false);
 });
 
 test('fresh-chat runner retries once after losing its ChatGPT tab', async () => {

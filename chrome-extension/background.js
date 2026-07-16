@@ -39,7 +39,7 @@ async function getChatGptTab() {
   if (saved.chatTabId) {
     try { return await chrome.tabs.get(saved.chatTabId); } catch (_) {}
   }
-  const tab = await chrome.tabs.create({ url: CHATGPT_URL, active: true });
+  const tab = await chrome.tabs.create({ url: CHATGPT_URL, active: false });
   await chrome.storage.session.set({ chatTabId: tab.id });
   return tab;
 }
@@ -69,7 +69,7 @@ async function cancelJob(jobId, appTabId) {
 async function openFreshChat(tabId, temporary = true) {
   const waiting = waitForTabComplete(tabId);
   const mode = temporary ? 'temporary-chat=true&' : '';
-  await chrome.tabs.update(tabId, { url: `${CHATGPT_URL}?${mode}spotJob=${Date.now()}`, active: true });
+  await chrome.tabs.update(tabId, { url: `${CHATGPT_URL}?${mode}spotJob=${Date.now()}`, active: false });
   await waiting;
 }
 
