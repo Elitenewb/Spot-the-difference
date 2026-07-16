@@ -90,21 +90,11 @@
   <main>
     <aside>
       <div class="mode-tabs" role="tablist" aria-label="Puzzle creation mode">
-        <button id="manualTab" role="tab" aria-selected="true" aria-controls="manualPanel">Manual upload</button>
-        <button id="aiTab" role="tab" aria-selected="false" aria-controls="aiPanel">AI with ChatGPT</button>
+        <button id="aiTab" role="tab" aria-selected="true" aria-controls="aiPanel">AI with ChatGPT</button>
+        <button id="manualTab" role="tab" aria-selected="false" aria-controls="manualPanel">Manual upload</button>
       </div>
 
-      <section id="manualPanel" class="mode-panel" role="tabpanel" aria-labelledby="manualTab">
-        <div class="section">
-          <label for="modFile">Modified image</label>
-          <input id="modFile" type="file" accept="image/*" />
-          <label for="origFile">Original image</label>
-          <input id="origFile" type="file" accept="image/*" />
-          <div class="hint">Preserves the existing workflow. Both images must have identical pixel dimensions.</div>
-        </div>
-      </section>
-
-      <section id="aiPanel" class="mode-panel" role="tabpanel" aria-labelledby="aiTab" hidden>
+      <section id="aiPanel" class="mode-panel" role="tabpanel" aria-labelledby="aiTab">
         <div class="steps">
           <section id="uploadStep" class="step">
             <span class="step-number">1</span>
@@ -145,6 +135,16 @@
             <p class="hint">Opening this section also reveals region editing, individual file downloads, import tools, and diagnostics below.</p>
           </div>
         </details>
+      </section>
+
+      <section id="manualPanel" class="mode-panel" role="tabpanel" aria-labelledby="manualTab" hidden>
+        <div class="section">
+          <label for="modFile">Modified image</label>
+          <input id="modFile" type="file" accept="image/*" />
+          <label for="origFile">Original image</label>
+          <input id="origFile" type="file" accept="image/*" />
+          <div class="hint">Preserves the existing workflow. Both images must have identical pixel dimensions.</div>
+        </div>
       </section>
 
       <div id="manualTools" class="section row">

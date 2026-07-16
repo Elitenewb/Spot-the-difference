@@ -15,7 +15,7 @@
   };
 
   const state = {
-    mode:'manual', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
+    mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
     editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0
@@ -636,6 +636,7 @@
   els.downloadBothBtn.addEventListener('click',()=>{ downloadModified(); setTimeout(downloadConfig,250); });
   els.downloadReadyBtn.addEventListener('click',()=>{ downloadModified(); setTimeout(downloadConfig,250); });
   els.aiAdvanced.addEventListener('toggle',()=>document.body.classList.toggle('advanced-open',state.mode==='ai'&&els.aiAdvanced.open));
+  setMode('ai');
   els.importBtn.addEventListener('click',()=>els.importFile.click());
   els.importFile.addEventListener('change',async event=>{
     const file=event.target.files[0]; if(!file)return;

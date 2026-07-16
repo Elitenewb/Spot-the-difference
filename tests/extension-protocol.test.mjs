@@ -104,6 +104,9 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creatorHtml.includes('Generate the puzzle'));
   assert.ok(creatorHtml.includes('Download the finished puzzle'));
   assert.ok(creatorHtml.includes('<summary>Advanced options</summary>'));
+  assert.match(creatorHtml, /id="aiTab"[^>]*aria-selected="true"[^>]*>AI with ChatGPT<\/button>/);
+  assert.match(creatorHtml, /id="manualTab"[^>]*aria-selected="false"[^>]*>Manual upload<\/button>/);
+  assert.ok(creator.includes("mode:'ai'"));
   const ids=[...creatorHtml.matchAll(/\sid="([^"]+)"/g)].map(match=>match[1]);
   assert.equal(new Set(ids).size,ids.length,'creator element IDs must remain unique');
   assert.ok(adapter.includes('SD_CHATGPT_REPAIR_ANALYSIS'));
