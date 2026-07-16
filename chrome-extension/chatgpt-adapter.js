@@ -53,6 +53,7 @@
         settled = true;
         observer.disconnect();
         clearTimeout(timer);
+        clearInterval(interval);
         document.removeEventListener('load', check, true);
         error ? reject(error) : resolve(value);
       };
@@ -67,6 +68,7 @@
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
       document.addEventListener('load', check, true);
+      const interval = setInterval(check, 1000);
       const timer = setTimeout(() => finish(null, new Error(message)), timeoutMs);
       check();
     });
@@ -213,23 +215,31 @@
     return isSingleRegion ? [parsed] : null;
   }
 
-  async function waitForAnalysis(beforeCount, beforeTurnCount) {
+  function regionResponseCandidates() {
+    const fallbackTurns = allMatches(SELECTORS.conversationTurn).filter(turn => !isUserTurn(turn));
+    return [...new Set([...assistantMessages(), ...fallbackTurns])];
+  }
+
+  function regionsInMessage(message) {
+    const parsed = extractJson(message.innerText || message.textContent || '');
+    return parsed ? regionsFromParsedJson(parsed) : null;
+  }
+
+  function regionResponseSignatures() {
+    return new Set(regionResponseCandidates().map(regionsInMessage).filter(Array.isArray).map(regions => JSON.stringify(regions)));
+  }
+
+  async function waitForAnalysis(beforeSignatures) {
     return waitForDomMutation(() => {
-      const messages = assistantMessages();
-      // ChatGPT's accessible assistant markers have changed several times. Prefer
-      // newly recognized assistant messages, but also inspect only conversation
-      // turns created after this request so a visible JSON response cannot be lost
-      // merely because its role marker changed.
-      const newTurns = allMatches(SELECTORS.conversationTurn)
-        .slice(beforeTurnCount)
-        .filter(turn => !isUserTurn(turn))
-        .reverse();
-      const candidates = [...new Set([...messages.slice(beforeCount).reverse(), ...newTurns])];
+      // A parseable array can briefly exist before ChatGPT has finished streaming.
+      // Preserve the original flow's UI completion cue: do not advance until the
+      // Stop control has disappeared and the response is visibly finished.
+      if (firstMatch(SELECTORS.stop)) return null;
+      const candidates = regionResponseCandidates().reverse();
       for (const message of candidates) {
-        const parsed = extractJson(message.innerText || message.textContent || '');
-        if (!parsed) continue;
-        const regions = regionsFromParsedJson(parsed);
-        if (Array.isArray(regions)) return regions;
+        const regions = regionsInMessage(message);
+        if (!Array.isArray(regions)) continue;
+        if (!beforeSignatures.has(JSON.stringify(regions))) return regions;
       }
       return null;
     }, 180000, 'ChatGPT did not return parseable region JSON within three minutes.');
@@ -283,29 +293,29 @@
   }
 
   async function runAnalysis(payload) {
+    const beforeSignatures = regionResponseSignatures();
     const before = assistantMessages().length;
-    const beforeTurns = allMatches(SELECTORS.conversationTurn).length;
     reportProgress(payload, 'uploading', 'Uploading the analysis image to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-original.jpg', payload);
     await submitPrompt(payload.prompt, payload, before);
-    return waitForAnalysis(before, beforeTurns);
+    return waitForAnalysis(beforeSignatures);
   }
 
   async function runRepairAnalysis(payload) {
+    const beforeSignatures = regionResponseSignatures();
     const before = assistantMessages().length;
-    const beforeTurns = allMatches(SELECTORS.conversationTurn).length;
     reportProgress(payload, 'submitted', 'Requesting replacement suggestions from ChatGPT…');
     await submitPrompt(payload.prompt, payload, before);
-    return waitForAnalysis(before, beforeTurns);
+    return waitForAnalysis(beforeSignatures);
   }
 
   async function runVerifyAnalysis(payload) {
+    const beforeSignatures = regionResponseSignatures();
     const before = assistantMessages().length;
-    const beforeTurns = allMatches(SELECTORS.conversationTurn).length;
     reportProgress(payload, 'uploading', 'Uploading the numbered region review to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-regions-review.jpg', payload);
     await submitPrompt(payload.prompt, payload, before);
-    return waitForAnalysis(before, beforeTurns);
+    return waitForAnalysis(beforeSignatures);
   }
 
   async function runEdit(payload) {
