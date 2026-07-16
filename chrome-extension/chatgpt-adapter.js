@@ -126,11 +126,16 @@
     return null;
   }
 
-  async function waitForAnalysis(beforeCount) {
+  async function waitForAnalysis(beforeCount, beforeTurnCount) {
     return waitFor(() => {
       const messages = assistantMessages();
-      if (messages.length <= beforeCount) return null;
-      for (const message of messages.slice(beforeCount).reverse()) {
+      // ChatGPT's accessible assistant markers have changed several times. Prefer
+      // newly recognized assistant messages, but also inspect only conversation
+      // turns created after this request so a visible JSON response cannot be lost
+      // merely because its role marker changed.
+      const newTurns = allMatches(SELECTORS.conversationTurn).slice(beforeTurnCount).reverse();
+      const candidates = [...new Set([...messages.slice(beforeCount).reverse(), ...newTurns])];
+      for (const message of candidates) {
         const parsed = extractJson(message.innerText || message.textContent || '');
         if (!parsed) continue;
         const regions = Array.isArray(parsed) ? parsed : parsed.regions;
@@ -189,17 +194,19 @@
 
   async function runAnalysis(payload) {
     const before = assistantMessages().length;
+    const beforeTurns = allMatches(SELECTORS.conversationTurn).length;
     reportProgress(payload, 'uploading', 'Uploading the analysis image to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-original.jpg', payload);
     await submitPrompt(payload.prompt, payload, before);
-    return waitForAnalysis(before);
+    return waitForAnalysis(before, beforeTurns);
   }
 
   async function runRepairAnalysis(payload) {
     const before = assistantMessages().length;
+    const beforeTurns = allMatches(SELECTORS.conversationTurn).length;
     reportProgress(payload, 'submitted', 'Requesting replacement suggestions from ChatGPT…');
     await submitPrompt(payload.prompt, payload, before);
-    return waitForAnalysis(before);
+    return waitForAnalysis(before, beforeTurns);
   }
 
   async function runEdit(payload) {

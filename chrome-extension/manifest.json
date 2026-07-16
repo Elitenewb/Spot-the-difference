@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Spot the Difference AI Bridge",
   "description": "Connects the local Spot the Difference creator to a logged-in ChatGPT tab for region planning and crop-by-crop image editing.",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "permissions": ["tabs", "storage"],
   "host_permissions": [
     "https://chatgpt.com/*",
