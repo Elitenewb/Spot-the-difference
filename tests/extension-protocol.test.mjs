@@ -111,8 +111,13 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(!creator.includes("Do not use Adobe, Photoshop, Canva"));
   assert.ok(creator.includes('requestMissingRegions(validation)'));
   assert.ok(creator.includes('requesting ${missing} replacement'));
-  assert.ok(creator.includes('use at least 0.025'));
+  assert.ok(creator.includes('0.025 to 0.12'));
   assert.ok(creator.includes('region.wNorm<=.018'));
+  assert.ok(creator.includes('region.wNorm>.22||region.hNorm>.22'));
+  assert.ok(creator.includes('region.wNorm*region.hNorm>=.04'));
+  assert.ok(creator.includes('the proposed change moves a limb or changes the person’s pose'));
+  assert.ok(creator.includes('Never move a whole arm or leg'));
+  assert.ok(creator.includes("Never move a whole limb, change a person's pose"));
   assert.ok(creator.includes('the proposed change is too small to find at normal viewing size'));
   assert.ok(creator.includes('at least 6 of every 10 suggestions'));
   assert.ok(creator.includes("region.changeType==='color'"));
