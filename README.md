@@ -31,6 +31,8 @@ Suggestion prompts favor additions and replacements that are noticeable on close
 
 AI mode presents a three-step creator workflow: upload one photo, generate the complete puzzle, then download the modified PNG and config JSON together. Validated suggestions proceed directly into crop generation without an approval step. Region editing, retry controls, individual downloads, import tools, and diagnostics remain available under Advanced options. When people are present, prompts can include occasional harmless visual jokes involving clothing, accessories, or cleanly omitted small features while explicitly avoiding injury, distress, offensive content, or grotesque results.
 
+AI suggestions must now be visible at normal full-image viewing size. The creator rejects undersized regions and instructions aimed at rings, pins, magnets, punctuation, single shoelaces, isolated buttons, and similar micro-details, then requests larger replacements. In AI mode the creator shows one clean generated preview without rectangle overlays or drag editing. Step 2 includes a weighted percentage bar: analysis occupies the opening portion and the ten image edits share the remaining progress according to their upload, submission, generation, and completion stages.
+
 To play, open `player.html`, load the modified image, original image, and exported JSON, then select **Load game**.
 
 Both images must use the same pixel dimensions. Puzzle regions are stored as normalized coordinates, so they stay aligned when the game is resized.

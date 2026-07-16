@@ -8,7 +8,7 @@
     modFrame:$('modFrame'), origFrame:$('origFrame'), need:$('need'), regionList:$('regionList'), regionCount:$('regionCount'),
     exportBtn:$('exportBtn'), downloadImageBtn:$('downloadImageBtn'), downloadBothBtn:$('downloadBothBtn'), downloadReadyBtn:$('downloadReadyBtn'), importBtn:$('importBtn'), importFile:$('importFile'),
     clearBtn:$('clearPoints'), undoBtn:$('undoPoint'), analyzeBtn:$('analyzeBtn'), generateBtn:$('generateBtn'), cancelAiBtn:$('cancelAiBtn'),
-    checkExtensionBtn:$('checkExtensionBtn'), extensionStatus:$('extensionStatus'), aiRunStatus:$('aiRunStatus'), aiProgress:$('aiProgress'),
+    checkExtensionBtn:$('checkExtensionBtn'), extensionStatus:$('extensionStatus'), aiRunStatus:$('aiRunStatus'), aiProgress:$('aiProgress'), aiProgressBar:$('aiProgressBar'), aiProgressText:$('aiProgressText'),
     patchUpload:$('patchUpload'), modBadge:$('modBadge'), diagnostics:$('creatorDiagnostics'), aiAdvanced:$('aiAdvanced'),
     uploadStep:$('uploadStep'), generateStep:$('generateStep'), downloadStep:$('downloadStep'),
     runDiagnostics:$('runCreatorDiagnostics'), loadClassroomFixture:$('loadClassroomFixture'), testLog:$('creatorTestLog')
@@ -18,7 +18,7 @@
     mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0
+    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -29,6 +29,17 @@
   function clamp(value,min,max){ return Math.max(min,Math.min(max,value)); }
   function dpr(){ return Math.max(1,window.devicePixelRatio||1); }
   function expectedCount(){ return clamp(Number(els.need.value)||10,1,30); }
+  function setAiProgress(value){
+    const percent=clamp(Math.round(value),0,100);
+    state.aiProgressPercent=percent;
+    els.aiProgress.style.width=`${percent}%`;
+    els.aiProgressText.textContent=`${percent}%`;
+    els.aiProgressBar.setAttribute('aria-valuenow',String(percent));
+  }
+  function editStageProgress(stage){
+    const weight={uploading:.06,attached:.16,submitted:.3,editing:.4,opening:.78}[stage]??.03;
+    return 15+((state.editCompleted+weight)/Math.max(1,state.editTotal))*85;
+  }
 
   function resetWorkspace(){
     clearJobTimer();
@@ -52,7 +63,7 @@
     els.aiPanel.hidden=manual;
     document.body.classList.toggle('ai-simple',!manual);
     document.body.classList.toggle('advanced-open',!manual&&els.aiAdvanced.open);
-    els.modBadge.textContent=manual?'Modified — drag to mark a region':'AI preview — drag to add or adjust the region set';
+    els.modBadge.textContent=manual?'Modified — drag to mark a region':'Generated puzzle preview';
     updateControls();
     if(!manual) pingExtension();
   }
@@ -109,7 +120,7 @@
     initializeWorkCanvasFromModified();
     fitCanvasSize();
     updateRegionList();
-    els.aiProgress.style.width='0%';
+    state.workflowPhase='idle'; setAiProgress(0);
     els.aiRunStatus.textContent='Photo ready. Click Generate puzzle.';
     updateControls();
   }
@@ -165,7 +176,7 @@
     if(state.originalImage) ctxOriginal.drawImage(state.originalImage,0,0,w,h);
     if(state.workCanvas.width&&state.workCanvas.height) ctxModified.drawImage(state.workCanvas,0,0,w,h);
     else if(state.modifiedImage) ctxModified.drawImage(state.modifiedImage,0,0,w,h);
-    for(const region of state.regions){ drawGuide(els.modCanvas,region); drawGuide(els.origCanvas,region); }
+    if(state.mode==='manual')for(const region of state.regions){ drawGuide(els.modCanvas,region); drawGuide(els.origCanvas,region); }
     if(state.dragging&&state.dragStart&&state.dragCurrent){
       const preview=normToRect(state.dragStart,state.dragCurrent);
       drawDragPreview(els.modCanvas,preview); drawDragPreview(els.origCanvas,preview);
@@ -204,7 +215,7 @@
   function dragDistance(a,b){ return Math.hypot((a.xNorm-b.xNorm)*els.modCanvas.clientWidth,(a.yNorm-b.yNorm)*els.modCanvas.clientHeight); }
 
   function beginDrag(event){
-    if(!state.naturalW||state.regions.length>=expectedCount()||state.aiBusy) return;
+    if(state.mode==='ai'||!state.naturalW||state.regions.length>=expectedCount()||state.aiBusy) return;
     if(typeof event.preventDefault==='function')event.preventDefault();
     state.dragging=true; state.dragStart=canvasToNorm(event,els.modCanvas); state.dragCurrent=state.dragStart;
   }
@@ -383,7 +394,7 @@
   }
 
   function analysisPrompt(){
-    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this full image and choose exactly ${expectedCount()} distinct, visually meaningful details that can each be edited independently. Make the differences clear on close inspection but still natural, believable, and not awkward or immediately obvious. When people are visible, prioritize people, their clothes, and accessories for roughly half the set. Include an occasional harmless visual joke when it suits the image: for example cleanly omit one eyebrow, a mouth, one eye, one visible finger, a glasses lens, a shoelace, a pocket, a button, or a small clothing feature. These jokes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Do not alter a person's identity or body shape. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions, such as adding a small plausible accessory, replacing a symbol or short word, changing an object's shape or pattern, or swapping one clothing detail for another. Use removals sparingly except for one or two playful omissions. Do not rely on tiny marks or extremely subtle changes. Use no more than 2 color-only changes in a set of 10. Avoid overlapping regions, image borders, large areas, and changes that would alter the global composition. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Every rectangle must have wNorm and hNorm greater than 0.006; use at least 0.008 for each dimension to leave a safety margin. Each rectangle must tightly enclose its target and use less than 15% of the image area.`;
+    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this full image and choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently. Every finished difference must be findable at normal full-image viewing size without zooming. Aim for medium-sized, visually meaningful changes: obvious once noticed, but still believable and localized rather than huge or composition-changing. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Favor substantial playful changes such as cleanly removing a whole mouth or eyebrow, removing one or two clearly visible fingers, changing a facial expression without changing identity, replacing glasses, adding or removing a hat, changing a sleeve or collar, replacing a prominent shirt graphic, altering a hairstyle detail, or adding/removing a clearly visible clothing feature. These changes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions. Use no more than 2 color-only changes in a set of 10. Do not choose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or other changes that would be hard to see at normal size. Avoid overlapping regions, image borders, and changes that alter the global composition. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Frame enough of the target to support a substantial edit: every rectangle must have wNorm and hNorm greater than 0.018, and should normally be at least 0.025 in both dimensions. Each rectangle must tightly enclose its target and use less than 15% of the image area.`;
   }
 
   function analysisImageDataUrl(){
@@ -456,12 +467,13 @@
       const region={id:uid(),xNorm:values[0]/scale,yNorm:values[1]/scale,wNorm:values[2]/scale,hNorm:values[3]/scale,instruction,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
       let reason='';
       if(!values.every(Number.isFinite))reason='coordinates must all be numeric';
-      else if(region.wNorm<=.006)reason=`width ${region.wNorm.toFixed(4)} is not greater than 0.006`;
-      else if(region.hNorm<=.006)reason=`height ${region.hNorm.toFixed(4)} is not greater than 0.006`;
+      else if(region.wNorm<=.018)reason=`width ${region.wNorm.toFixed(4)} is not greater than 0.018`;
+      else if(region.hNorm<=.018)reason=`height ${region.hNorm.toFixed(4)} is not greater than 0.018`;
       else if(region.xNorm<0||region.yNorm<0||region.xNorm+region.wNorm>1||region.yNorm+region.hNorm>1)reason='rectangle extends outside the image';
       else if(region.wNorm*region.hNorm>=.15)reason='rectangle covers 15% or more of the image';
       else if(normalized.some(existing=>regionOverlap(existing,region)>.2))reason='rectangle overlaps an accepted suggestion by more than 20%';
       else if(region.changeType==='color'&&normalized.filter(existing=>existing.changeType==='color').length>=2)reason='the set already contains the maximum of two color-only changes';
+      else if(/\b(?:tiny|ring|pin|magnet|hyphen|punctuation|single shoelace|one shoelace|watch face|isolated button)\b/i.test(region.instruction))reason='the proposed change is too small to find at normal viewing size';
       else if(normalized.length>=expectedCount())reason='more suggestions were returned than requested';
       if(reason)rejected.push({number:index+1,reason,instruction:region.instruction});
       else normalized.push(region);
@@ -473,7 +485,7 @@
     const acceptedJson=accepted.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction})=>({xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
     const reasons=rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')||'The response did not contain enough usable regions.';
     const colorSlots=Math.max(0,2-accepted.filter(region=>region.changeType==='color').length);
-    return `Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only. Favor meaningful additions and replacements that are clear on close inspection but natural and believable. When people are visible, prefer their clothes, accessories, or an occasional harmless visual joke such as a cleanly omitted eyebrow, mouth, eye, visible finger, glasses lens, shoelace, pocket, or button. It must look playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like, with no wound, gore, distress, or damaged skin. Do not propose a tiny mark or an extremely subtle change. At most ${colorSlots} of these replacements may be color-only. Include changeType as add, replace, remove, color, or detail; use color only for a mere recoloring. Each replacement must identify a new detail that does not overlap any accepted rectangle by more than 20%. Every xNorm, yNorm, wNorm, and hNorm must be numeric from 0 to 1. Both wNorm and hNorm must be greater than 0.006; use at least 0.008 for safety. Each rectangle must stay inside the image and cover less than 15% of it. Do not repeat any accepted target. Accepted regions to avoid: ${JSON.stringify(acceptedJson)}.`;
+    return `Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only. Each replacement must create a medium-sized difference that is findable at normal full-image viewing size without zooming. Favor substantial additions and replacements. When people are visible, prefer a whole facial, hand, hair, clothing, or accessory feature: for example remove a whole mouth or eyebrow, remove one or two clearly visible fingers, change an expression without changing identity, replace glasses, add/remove a hat, change a sleeve or collar, replace a prominent shirt graphic, or alter a hairstyle detail. Keep it playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like, with no wound, gore, distress, or damaged skin. Do not propose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or mere color changes beyond the remaining allowance. At most ${colorSlots} of these replacements may be color-only. Include changeType as add, replace, remove, color, or detail; use color only for a mere recoloring. Each replacement must identify a new detail that does not overlap any accepted rectangle by more than 20%. Every xNorm, yNorm, wNorm, and hNorm must be numeric from 0 to 1. Both wNorm and hNorm must be greater than 0.018; use at least 0.025 for safety. Each rectangle must stay inside the image and cover less than 15% of it. Do not repeat any accepted target. Accepted regions to avoid: ${JSON.stringify(acceptedJson)}.`;
   }
 
   function requestMissingRegions(validation){
@@ -485,6 +497,7 @@
     const details=validation.rejected.map(item=>`#${item.number} ${item.reason}`).join('; ');
     setExtensionStatus('busy',`Accepted ${state.regions.length} of ${expectedCount()}; requesting ${missing} replacement${missing===1?'':'s'}…`);
     els.aiRunStatus.textContent=`Rejected ${validation.rejected.length}: ${details}. Requesting ${missing} replacement${missing===1?'':'s'}…`;
+    setAiProgress(Math.max(state.aiProgressPercent,12));
     updateRegionList(); draw();
     armJobTimer(240000,`Replacement analysis ${state.analysisRepairAttempts}`);
     postToExtension('SPOT_DIFF_REPAIR_ANALYSIS',{jobId:state.activeJobId,count:missing,prompt:repairAnalysisPrompt(missing,state.regions,validation.rejected)});
@@ -502,9 +515,10 @@
   async function startAnalysis(){
     if(!state.originalDataUrl||state.aiBusy)return;
     state.aiBusy=true; state.activeJobId=uid('analysis');
+    state.workflowPhase='analysis';
     state.analysisRepairAttempts=0;
     setExtensionStatus('busy','ChatGPT is inspecting the image…');
-    els.aiProgress.style.width='4%';
+    setAiProgress(2);
     els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
     armJobTimer(240000,'Region analysis');
     postToExtension('SPOT_DIFF_ANALYZE',{jobId:state.activeJobId,imageDataUrl:analysisImageDataUrl(),count:expectedCount(),prompt:analysisPrompt()});
@@ -513,7 +527,7 @@
   function editPrompt(region,geometry,index){
     const left=Math.round(geometry.targetX/geometry.cropW*100),top=Math.round(geometry.targetY/geometry.cropH*100);
     const right=Math.round((geometry.targetX+geometry.targetW)/geometry.cropW*100),bottom=Math.round((geometry.targetY+geometry.targetH)/geometry.cropH*100);
-    return `Edit this crop for a fun classroom spot-the-difference puzzle. ${region.instruction.trim()} Make the change seamless, believable, and gently amusing when the instruction is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact viewpoint, lighting, texture, color profile, sharpness, and all unrelated details. The target is approximately ${left}%–${right}% across and ${top}%–${bottom}% down; change only that target. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited image only, keeping the same aspect ratio. This is edit ${index+1} of ${state.regions.length}.`;
+    return `Edit this crop for a fun classroom spot-the-difference puzzle. ${region.instruction.trim()} Make the requested difference clearly visible at normal image viewing size; change the whole requested feature rather than making a microscopic or barely perceptible adjustment. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact viewpoint, lighting, texture, color profile, sharpness, and all unrelated details. The target is approximately ${left}%–${right}% across and ${top}%–${bottom}% down; change only that target. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited image only, keeping the same aspect ratio. This is edit ${index+1} of ${state.regions.length}.`;
   }
 
   function startAiWorkflow(){
@@ -531,7 +545,7 @@
 
   function startEditQueue(regions){
     if(state.aiBusy||!state.extensionConnected||!regions.length)return;
-    state.aiBusy=true; state.activeJobId=uid('edit'); els.aiProgress.style.width='0%';
+    state.aiBusy=true; state.activeJobId=uid('edit'); state.workflowPhase='editing'; setAiProgress(15);
     setExtensionStatus('busy','ChatGPT edit queue is running…');
     els.aiRunStatus.textContent=`Preparing ${regions.length} crop edit${regions.length===1?'':'s'}…`;
     state.editQueue=regions.map(region=>{
@@ -547,7 +561,7 @@
   function sendNextEdit(){
     const edit=state.editQueue[0];
     if(!edit){
-      clearJobTimer(); state.aiBusy=false; els.aiProgress.style.width='100%'; setExtensionStatus('connected','Edit queue complete');
+      clearJobTimer(); state.aiBusy=false; state.workflowPhase='complete'; setAiProgress(100); setExtensionStatus('connected','Edit queue complete');
       els.aiRunStatus.textContent='Puzzle complete. Download both files in step 3.'; updateRegionList(); updateControls();
       return;
     }
@@ -568,7 +582,7 @@
   function cancelAi(){
     if(!state.aiBusy)return;
     failAi('Current ChatGPT job cancelled. You can adjust the puzzle and retry.');
-    els.aiProgress.style.width='0%';
+    state.workflowPhase='idle'; setAiProgress(0);
   }
 
   window.addEventListener('message',async event=>{
@@ -583,6 +597,7 @@
         const validation=validateSuggestedRegions(payload.regions,payload.repair?state.regions:[]);
         if(requestMissingRegions(validation))return;
         state.regions=validation.accepted.slice(0,expectedCount());
+        setAiProgress(Math.max(state.aiProgressPercent,14));
         state.appliedPatches.clear(); state.aiBusy=false;
         setExtensionStatus('connected',`${state.regions.length} differences selected`);
         els.aiRunStatus.textContent='Differences selected. Starting image edits automatically…';
@@ -595,13 +610,18 @@
       if(payload.kind==='edit'){
         const region=state.regions.find(item=>item.id===payload.regionId);
         if(region)region.status=payload.stage||'editing';
+        setAiProgress(Math.max(state.aiProgressPercent,editStageProgress(payload.stage)));
         updateRegionList();
+      }else{
+        const analysisStage={uploading:4,attached:7,submitted:10}[payload.stage]??6;
+        setAiProgress(Math.max(state.aiProgressPercent,payload.kind==='analysis-repair'?12:analysisStage));
       }
     }
     if(type==='SPOT_DIFF_EDIT_PROGRESS'&&payload?.jobId===state.activeJobId){
       const region=state.regions.find(item=>item.id===payload.regionId);
       if(region) region.status=payload.status||'editing';
-      els.aiProgress.style.width=`${clamp((payload.completed||0)/(payload.total||1)*100,0,100)}%`;
+      if(state.workflowPhase==='analysis')setAiProgress(Math.max(state.aiProgressPercent,3));
+      else setAiProgress(Math.max(state.aiProgressPercent,editStageProgress(payload.status||'editing')));
       els.aiRunStatus.textContent=payload.message||`Editing ${Math.min((payload.completed||0)+1,payload.total||1)} of ${payload.total||1}…`;
       updateRegionList();
     }
@@ -611,7 +631,7 @@
         try{
           await applyPatch(region,payload.imageDataUrl);
           state.editQueue.shift(); state.editCompleted++;
-          els.aiProgress.style.width=`${state.editCompleted/state.editTotal*100}%`;
+          setAiProgress(15+(state.editCompleted/state.editTotal)*85);
           sendNextEdit();
         }catch(error){ region.status='error'; failAi(error.message); }
       }

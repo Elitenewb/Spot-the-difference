@@ -45,6 +45,9 @@
     .status.error .status-dot{background:var(--bad)}
     @keyframes pulse{50%{opacity:.35}}
     .canvas-wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px;align-content:start;min-width:0;overflow:auto}
+    body.ai-simple .canvas-wrap{grid-template-columns:minmax(0,1100px);justify-content:center}
+    body.ai-simple #origCard{display:none}
+    body.ai-simple canvas{cursor:default}
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px;min-width:0}
     .frame{position:relative;background:#0a0d1b;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3}
     canvas{width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
@@ -61,8 +64,9 @@
     .region-actions{display:flex;gap:6px;margin-top:7px}
     .region-actions button{padding:6px 8px;font-size:11px}
     .region-item textarea{min-height:58px;padding:8px;font-size:12px}
-    .progress{height:7px;background:#0d1020;border:1px solid #2b3152;border-radius:999px;overflow:hidden;margin-top:8px}
-    .progress>div{height:100%;width:0;background:linear-gradient(90deg,#5bbde9,#7bd4ff);transition:width .2s ease}
+    .progress{position:relative;height:22px;background:#0d1020;border:1px solid #2b3152;border-radius:999px;overflow:hidden;margin-top:10px}
+    .progress>div{height:100%;width:0;background:linear-gradient(90deg,#3da9dc,#7bd4ff);transition:width .35s ease}
+    .progress>span{position:absolute;inset:0;display:grid;place-items:center;color:#eefaff;font-size:11px;font-weight:800;text-shadow:0 1px 2px #001019}
     .steps{display:grid;gap:12px}
     .step{display:grid;grid-template-columns:34px 1fr;gap:11px;padding:13px;border:1px solid #2b3152;border-radius:13px;background:var(--panel2)}
     .step-number{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#243352;color:#dff5ff;font-weight:800}
@@ -76,7 +80,6 @@
     .advanced-body{padding-top:14px}
     .advanced[hidden]{display:none}
     body.ai-simple #manualTools,body.ai-simple #manualRegions,body.ai-simple #manualExport{display:none}
-    body.ai-simple.advanced-open #manualTools,body.ai-simple.advanced-open #manualRegions,body.ai-simple.advanced-open #manualExport{display:flex}
     body.ai-simple.advanced-open #manualRegions,body.ai-simple.advanced-open #manualExport{display:block}
     .hidden-input{display:none}
     @media(max-width:1000px){main{grid-template-columns:350px minmax(0,1fr)}.canvas-wrap{grid-template-columns:1fr}}
@@ -112,8 +115,8 @@
               <button id="analyzeBtn" class="primary" disabled>Upload a photo first</button>
               <div id="extensionStatus" class="status" role="status" aria-live="polite"><span class="status-dot"></span><span>Checking connection…</span></div>
               <button id="checkExtensionBtn" class="danger" style="margin-top:7px" hidden>Check connection</button>
-              <div class="progress" aria-hidden="true"><div id="aiProgress"></div></div>
               <div id="aiRunStatus" class="hint" role="status" aria-live="polite">Upload a photo to begin.</div>
+              <div id="aiProgressBar" class="progress" role="progressbar" aria-label="Puzzle generation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="aiProgress"></div><span id="aiProgressText">0%</span></div>
             </div>
           </section>
           <section id="downloadStep" class="step">
@@ -189,11 +192,11 @@
     </aside>
 
     <div class="canvas-wrap">
-      <div class="card">
+      <div id="modCard" class="card">
         <span id="modBadge" class="badge">Modified — drag to mark a region</span>
         <div class="frame" id="modFrame"><canvas id="modCanvas"></canvas></div>
       </div>
-      <div class="card">
+      <div id="origCard" class="card">
         <span class="badge">Original reference</span>
         <div class="frame" id="origFrame"><canvas id="origCanvas"></canvas></div>
       </div>
