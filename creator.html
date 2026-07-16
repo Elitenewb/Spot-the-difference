@@ -113,7 +113,6 @@
               <h2>Generate the puzzle</h2>
               <p>ChatGPT will choose 10 differences and create them automatically. A ChatGPT tab will open while it works.</p>
               <button id="analyzeBtn" class="primary" disabled>Upload a photo first</button>
-              <button id="cancelAiBtn" class="danger" style="margin-top:8px" hidden>Cancel generation</button>
               <div id="extensionStatus" class="status" role="status" aria-live="polite"><span class="status-dot"></span><span>Checking connection…</span></div>
               <button id="checkExtensionBtn" class="danger" style="margin-top:7px" hidden>Check connection</button>
               <div id="aiRunStatus" class="hint" role="status" aria-live="polite">Upload a photo to begin.</div>
@@ -204,6 +203,6 @@
   </main>
 
   <input id="patchUpload" class="hidden-input" type="file" accept="image/*" />
-  <script src="creator.js"></script>
+  <script src="creator.js?v=4"></script>
 </body>
 </html>

@@ -60,6 +60,10 @@ async function cancelJob(jobId, appTabId) {
     .filter(([, job]) => job.jobId === jobId && (!appTabId || job.appTabId === appTabId))
     .map(([tabId]) => tabId);
   await Promise.all(matchingTabs.map(tabId => discardChatGptTab(tabId)));
+  if (appTabId) await forward(appTabId, 'SPOT_DIFF_JOB_CANCELLED', {
+    jobId,
+    message: 'Generation cancelled. Ready when you want to try again.'
+  });
 }
 
 async function openFreshChat(tabId, temporary = true) {
@@ -120,7 +124,7 @@ async function runAnalysis(payload, appTabId) {
     if (!response?.ok) throw new Error(response?.error || 'ChatGPT analysis did not return a result.');
     await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions });
   } catch (error) {
-    await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
+    if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
     for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId) activeJobs.delete(tabId);
   }
@@ -136,7 +140,7 @@ async function runRepairAnalysis(payload, appTabId) {
     if (!response?.ok) throw new Error(response?.error || 'ChatGPT replacement analysis did not return a result.');
     await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions, repair: true });
   } catch (error) {
-    await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
+    if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
     for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId) activeJobs.delete(tabId);
   }
@@ -158,7 +162,7 @@ async function runEdit(payload, appTabId) {
     if (!imageDataUrl) throw new Error('The generated image could not be retrieved from ChatGPT.');
     await forward(appTabId, 'SPOT_DIFF_EDIT_RESULT', { jobId, regionId: edit.regionId, imageDataUrl });
   } catch (error) {
-    await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId, message: error.message });
+    if (!cancelledJobIds.has(jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId, message: error.message });
   } finally {
     for (const [tabId, job] of activeJobs) if (job.jobId === jobId) activeJobs.delete(tabId);
   }

@@ -95,3 +95,12 @@ test('closing the creator or ChatGPT tab cancels the active automation job', asy
   for (const listener of removeListeners) listener(42);
   assert.deepEqual(cancelled, [{ jobId: 'stuck-job', appTabId: 5 }]);
 });
+
+test('cancellation tells the creator to return to a ready state', async () => {
+  const { context } = loadBackgroundHarness();
+  const forwarded = [];
+  context.forward = async (_tabId, type, payload) => { forwarded.push({ type, payload }); };
+  await context.cancelJob('cancel-me', 5);
+  assert.equal(forwarded[0].type, 'SPOT_DIFF_JOB_CANCELLED');
+  assert.equal(forwarded[0].payload.jobId, 'cancel-me');
+});

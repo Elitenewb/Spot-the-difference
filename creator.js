@@ -7,7 +7,7 @@
     modFile:$('modFile'), origFile:$('origFile'), aiOrigFile:$('aiOrigFile'), modCanvas:$('modCanvas'), origCanvas:$('origCanvas'),
     modFrame:$('modFrame'), origFrame:$('origFrame'), need:$('need'), regionList:$('regionList'), regionCount:$('regionCount'),
     exportBtn:$('exportBtn'), downloadImageBtn:$('downloadImageBtn'), downloadBothBtn:$('downloadBothBtn'), downloadReadyBtn:$('downloadReadyBtn'), importBtn:$('importBtn'), importFile:$('importFile'),
-    clearBtn:$('clearPoints'), undoBtn:$('undoPoint'), analyzeBtn:$('analyzeBtn'), generateBtn:$('generateBtn'), cancelAiBtn:$('cancelAiBtn'),
+    clearBtn:$('clearPoints'), undoBtn:$('undoPoint'), analyzeBtn:$('analyzeBtn'), generateBtn:$('generateBtn'),
     checkExtensionBtn:$('checkExtensionBtn'), extensionStatus:$('extensionStatus'), aiRunStatus:$('aiRunStatus'), aiProgress:$('aiProgress'), aiProgressBar:$('aiProgressBar'), aiProgressText:$('aiProgressText'),
     patchUpload:$('patchUpload'), modBadge:$('modBadge'), diagnostics:$('creatorDiagnostics'), aiAdvanced:$('aiAdvanced'),
     uploadStep:$('uploadStep'), generateStep:$('generateStep'), downloadStep:$('downloadStep'),
@@ -279,13 +279,15 @@
     els.uploadStep.classList.toggle('done',!!state.originalImage);
     els.generateStep.classList.toggle('done',allEditsDone);
     els.downloadStep.classList.toggle('done',allEditsDone);
-    if(state.aiBusy)els.analyzeBtn.textContent='Generating…';
+    if(state.aiBusy)els.analyzeBtn.textContent='Cancel generation';
     else if(allEditsDone)els.analyzeBtn.textContent='Puzzle ready';
     else if(!state.originalImage)els.analyzeBtn.textContent='Upload a photo first';
     else if(!state.extensionConnected)els.analyzeBtn.textContent='Waiting for connection';
     else if(state.regions.length===expectedCount())els.analyzeBtn.textContent='Continue generation';
     else els.analyzeBtn.textContent='Generate puzzle';
-    els.analyzeBtn.disabled=!aiReady||allEditsDone;
+    els.analyzeBtn.disabled=state.aiBusy?false:(!aiReady||allEditsDone);
+    els.analyzeBtn.classList.toggle('danger',state.aiBusy);
+    els.analyzeBtn.classList.toggle('primary',!state.aiBusy);
     els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regions.some(region=>region.status!=='done'));
     els.exportBtn.disabled=!(hasImages&&countMatches);
     els.downloadImageBtn.disabled=!hasImages;
@@ -294,8 +296,6 @@
     els.downloadReadyBtn.textContent=allEditsDone?'Download image + config':'Waiting for generation';
     els.clearBtn.disabled=!state.regions.length||state.aiBusy;
     els.undoBtn.disabled=!state.regions.length||state.aiBusy;
-    els.cancelAiBtn.disabled=!state.aiBusy;
-    els.cancelAiBtn.hidden=!state.aiBusy;
     els.manualTab.disabled=state.aiBusy;
     els.aiTab.disabled=state.aiBusy;
     els.aiOrigFile.disabled=state.aiBusy;
@@ -588,6 +588,14 @@
     state.workflowPhase='idle'; setAiProgress(0);
   }
 
+  function finishCancelled(message='Generation cancelled. Ready when you want to try again.'){
+    clearJobTimer(); state.aiBusy=false; state.editQueue=[]; state.activeJobId=uid('cancelled'); state.workflowPhase='idle'; setAiProgress(0);
+    const retryableStates=new Set(['queued','editing','uploading','attached','submitted']);
+    for(const region of state.regions)if(retryableStates.has(region.status))region.status='pending';
+    state.extensionConnected=true; setExtensionStatus('connected','Ready'); els.aiRunStatus.textContent=message;
+    updateRegionList(); updateControls();
+  }
+
   window.addEventListener('message',async event=>{
     if(event.source!==window||event.data?.source!=='spot-diff-extension')return;
     const {type,payload}=event.data;
@@ -639,15 +647,15 @@
         }catch(error){ region.status='error'; failAi(error.message); }
       }
     }
+    if(type==='SPOT_DIFF_JOB_CANCELLED'&&payload?.jobId===state.activeJobId)finishCancelled(payload.message);
     if(type==='SPOT_DIFF_AI_ERROR'&&(!payload?.jobId||payload.jobId===state.activeJobId)) failAi(payload?.message||'The ChatGPT bridge reported an error.');
   });
 
   els.manualTab.addEventListener('click',()=>setMode('manual'));
   els.aiTab.addEventListener('click',()=>setMode('ai'));
   els.checkExtensionBtn.addEventListener('click',pingExtension);
-  els.analyzeBtn.addEventListener('click',startAiWorkflow);
+  els.analyzeBtn.addEventListener('click',()=>state.aiBusy?cancelAi():startAiWorkflow());
   els.generateBtn.addEventListener('click',startGeneration);
-  els.cancelAiBtn.addEventListener('click',cancelAi);
   window.addEventListener('pagehide',()=>{
     if(state.aiBusy)postToExtension('SPOT_DIFF_CANCEL',{jobId:state.activeJobId});
   });

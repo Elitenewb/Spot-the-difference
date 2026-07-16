@@ -60,10 +60,13 @@ test('creator bridge responds to ping and relays only allowed requests', async (
   assert.equal(posted.at(-1).source, 'spot-diff-extension');
   assert.equal(posted.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT');
 
+  runtimeListeners[0]({ type: 'SPOT_DIFF_JOB_CANCELLED', payload: { jobId: 'a' } });
+  assert.equal(posted.at(-1).type, 'SPOT_DIFF_JOB_CANCELLED');
+
   windowListeners[0]({ source: windowMock, data: { source: 'spot-diff-app', type: 'SPOT_DIFF_ANALYZE', payload: { jobId: 'bad', imageDataUrl: 'https://example.test/private.png', prompt: 'Upload this', count: 10 } } });
   assert.equal(sent.length, 2, 'invalid or remote image payload must not be relayed');
   runtimeListeners[0]({ type: 'SPOT_DIFF_UNEXPECTED', payload: { secret: true } });
-  assert.equal(posted.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT', 'unexpected background messages must not enter the page');
+  assert.equal(posted.at(-1).type, 'SPOT_DIFF_JOB_CANCELLED', 'unexpected background messages must not enter the page');
 });
 
 test('message protocol names agree across creator and extension layers', () => {
@@ -75,7 +78,7 @@ test('message protocol names agree across creator and extension layers', () => {
     assert.ok(bridge.includes(type), `bridge missing ${type}`);
     assert.ok(background.includes(type), `background missing ${type}`);
   }
-  for (const type of ['SPOT_DIFF_ANALYSIS_RESULT', 'SPOT_DIFF_EDIT_RESULT', 'SPOT_DIFF_AI_PROGRESS', 'SPOT_DIFF_AI_ERROR']) {
+  for (const type of ['SPOT_DIFF_ANALYSIS_RESULT', 'SPOT_DIFF_EDIT_RESULT', 'SPOT_DIFF_AI_PROGRESS', 'SPOT_DIFF_AI_ERROR', 'SPOT_DIFF_JOB_CANCELLED']) {
     assert.ok(creator.includes(type), `creator missing ${type}`);
     assert.ok(background.includes(type), `background missing ${type}`);
   }
@@ -114,7 +117,6 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('at least 6 of every 10 suggestions'));
   assert.ok(creator.includes("region.changeType==='color'"));
   assert.ok(creator.includes('maximum of two color-only changes'));
-  assert.ok(creator.includes("analyzeBtn.addEventListener('click',startAiWorkflow)"));
   assert.ok(creator.includes("startEditQueue(state.regions.filter(region=>region.status!=='done'))"));
   assert.ok(creator.includes("checkExtensionBtn.hidden=kind!=='error'"));
   assert.ok(creator.includes('substantial playful changes'));
@@ -123,8 +125,9 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creatorHtml.includes('Download the finished puzzle'));
   assert.ok(creatorHtml.includes('<summary>Advanced options</summary>'));
   assert.ok(creatorHtml.includes('id="aiProgressBar"'));
-  assert.ok(creatorHtml.includes('id="cancelAiBtn" class="danger"'));
-  assert.ok(creator.includes('els.cancelAiBtn.hidden=!state.aiBusy'));
+  assert.ok(creator.includes("els.analyzeBtn.textContent='Cancel generation'"));
+  assert.ok(creator.includes("els.analyzeBtn.addEventListener('click',()=>state.aiBusy?cancelAi():startAiWorkflow())"));
+  assert.ok(creator.includes("if(type==='SPOT_DIFF_JOB_CANCELLED'"));
   assert.ok(creatorHtml.includes('id="aiProgressText">0%</span>'));
   assert.ok(creatorHtml.includes('body.ai-simple #origCard{display:none}'));
   assert.ok(creator.includes("if(state.mode==='manual')for(const region of state.regions)"));
