@@ -78,7 +78,7 @@ test('message protocol names agree across creator and extension layers', () => {
   assert.ok(bridge.includes('SPOT_DIFF_BRIDGE_PING'));
   assert.ok(background.includes('SPOT_DIFF_BRIDGE_PING'));
   assert.ok(bridge.includes('try {\n      return Promise.resolve(chrome.runtime.sendMessage(message))'));
-  for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']) {
+  for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_VERIFY_ANALYSIS', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']) {
     assert.ok(creator.includes(type), `creator missing ${type}`);
     assert.ok(bridge.includes(type), `bridge missing ${type}`);
     assert.ok(background.includes(type), `background missing ${type}`);
@@ -157,6 +157,13 @@ test('creator and adapter include recovery guards for stalled website automation
   const ids=[...creatorHtml.matchAll(/\sid="([^"]+)"/g)].map(match=>match[1]);
   assert.equal(new Set(ids).size,ids.length,'creator element IDs must remain unique');
   assert.ok(adapter.includes('SD_CHATGPT_REPAIR_ANALYSIS'));
+  assert.ok(adapter.includes('SD_CHATGPT_VERIFY_ANALYSIS'));
+  assert.ok(background.includes('runVerifyAnalysis(message.payload, sender.tab.id)'));
+  assert.ok(creator.includes("postToExtension('SPOT_DIFF_VERIFY_ANALYSIS'"));
+  assert.ok(creator.includes('function annotatedRegionsDataUrl()'));
+  assert.ok(creator.includes('xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center'));
+  assert.ok(creator.includes('visually verify that every rectangle actually overlaps'));
+  assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, or reframe"));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
   assert.ok(adapter.includes("unavailable|unable|cannot|can't|could not|not available"));
   assert.ok(adapter.includes("conversationTurn: ['[data-testid^=\"conversation-turn-\"]']"));

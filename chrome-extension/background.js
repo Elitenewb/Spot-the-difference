@@ -126,7 +126,7 @@ async function runAnalysis(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId) activeJobs.delete(tabId);
+    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis') activeJobs.delete(tabId);
   }
 }
 
@@ -142,7 +142,22 @@ async function runRepairAnalysis(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId) activeJobs.delete(tabId);
+    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-repair') activeJobs.delete(tabId);
+  }
+}
+
+async function runVerifyAnalysis(payload, appTabId) {
+  try {
+    const tab = await getChatGptTab();
+    activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-verify' });
+    await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: 'ChatGPT is checking every numbered region against its target…', completed: 0, total: 1 });
+    const response = await sendToChatGpt(tab.id, { type: 'SD_CHATGPT_VERIFY_ANALYSIS', payload });
+    if (!response?.ok) throw new Error(response?.error || 'ChatGPT region verification did not return a result.');
+    await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions, verified: true });
+  } catch (error) {
+    if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
+  } finally {
+    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-verify') activeJobs.delete(tabId);
   }
 }
 
@@ -164,7 +179,7 @@ async function runEdit(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === jobId) activeJobs.delete(tabId);
+    for (const [tabId, job] of activeJobs) if (job.jobId === jobId && job.kind === 'edit') activeJobs.delete(tabId);
   }
 }
 
@@ -209,6 +224,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'SPOT_DIFF_REPAIR_ANALYSIS') {
     if (!validRepairPayload(message.payload)) return;
     runRepairAnalysis(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
+    return true;
+  }
+  if (message.type === 'SPOT_DIFF_VERIFY_ANALYSIS') {
+    if (!validAnalysisPayload(message.payload)) return;
+    runVerifyAnalysis(message.payload, sender.tab.id).finally(() => sendResponse({ completed: true }));
     return true;
   }
   if (message.type === 'SPOT_DIFF_EDIT_ONE') {

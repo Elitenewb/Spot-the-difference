@@ -1,14 +1,14 @@
 (() => {
   'use strict';
 
-  const allowedTypes = new Set(['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']);
+  const allowedTypes = new Set(['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_VERIFY_ANALYSIS', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']);
   const returnedTypes = new Set(['SPOT_DIFF_ANALYSIS_RESULT', 'SPOT_DIFF_EDIT_PROGRESS', 'SPOT_DIFF_EDIT_RESULT', 'SPOT_DIFF_AI_PROGRESS', 'SPOT_DIFF_AI_ERROR', 'SPOT_DIFF_JOB_CANCELLED']);
 
   function validText(value, max) { return typeof value === 'string' && value.length > 0 && value.length <= max; }
   function validImage(value) { return validText(value, 25_000_000) && /^data:image\/(?:png|jpeg|webp);base64,/i.test(value); }
   function validRequest(type, payload) {
     if (!payload || !validText(payload.jobId, 120)) return false;
-    if (type === 'SPOT_DIFF_ANALYZE') {
+    if (type === 'SPOT_DIFF_ANALYZE' || type === 'SPOT_DIFF_VERIFY_ANALYSIS') {
       return validImage(payload.imageDataUrl) && validText(payload.prompt, 12_000) && Number.isInteger(payload.count) && payload.count >= 1 && payload.count <= 30;
     }
     if (type === 'SPOT_DIFF_REPAIR_ANALYSIS') {

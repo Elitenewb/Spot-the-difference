@@ -18,7 +18,7 @@
     mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, workflowPhase:'idle', aiProgressPercent:0
+    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, analysisVerificationAttempts:0, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -400,16 +400,72 @@
   }
 
   function analysisPrompt(){
-    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this full image and choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently. Every finished difference must be findable at normal full-image viewing size without zooming. Aim for medium-impact but tightly localized changes: obvious once noticed, yet limited to one feature, accessory, or clothing detail. Never move a whole arm or leg, change a person's pose or body position, turn a raised limb into a lowered limb, or alter the global composition. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Favor substantial playful changes such as cleanly removing a whole mouth or eyebrow, removing one or two clearly visible fingers, changing a facial expression without changing identity, replacing glasses, adding or removing a hat, changing a collar, replacing a prominent shirt graphic, altering a hairstyle detail, or adding/removing a clearly visible clothing feature. These changes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions. Use no more than 2 color-only changes in a set of 10. Do not choose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or other changes that would be hard to see at normal size. Avoid overlapping regions and image borders. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Frame only the target feature; the editor adds surrounding context separately. Every rectangle must have wNorm and hNorm greater than 0.018 and should normally be 0.025 to 0.12 in each dimension. Neither dimension may exceed 0.22, and the rectangle must use less than 4% of the image area.`;
+    const {width,height}=analysisImageDimensions();
+    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this ${width} by ${height} image and choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently. The faint grid is only a coordinate guide and is not part of the scene. Every finished difference must be findable at normal full-image viewing size without zooming. Aim for medium-impact but tightly localized changes: obvious once noticed, yet limited to one feature, accessory, or clothing detail. Never move a whole arm or leg, change a person's pose or body position, turn a raised limb into a lowered limb, or alter the global composition. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Favor substantial playful changes such as cleanly removing a whole mouth or eyebrow, removing one or two clearly visible fingers, changing a facial expression without changing identity, replacing glasses, adding or removing a hat, changing a collar, replacing a prominent shirt graphic, altering a hairstyle detail, or adding/removing a clearly visible clothing feature. These changes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions. Use no more than 2 color-only changes in a set of 10. Do not choose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or other changes that would be hard to see at normal size. Avoid overlapping regions and image borders. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Coordinate convention is mandatory: the origin 0,0 is the image's upper-left corner; xNorm is the rectangle's LEFT EDGE divided by image width; yNorm is the rectangle's TOP EDGE divided by image height; wNorm and hNorm are its width and height. xNorm and yNorm are never the center point. For example, a box spanning from 30% to 40% across and 20% to 28% down is xNorm 0.30, yNorm 0.20, wNorm 0.10, hNorm 0.08. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Frame only the target feature; the editor adds surrounding context separately. Every rectangle must have wNorm and hNorm greater than 0.018 and should normally be 0.025 to 0.12 in each dimension. Neither dimension may exceed 0.22, and the rectangle must use less than 4% of the image area. Before returning JSON, visually verify that every rectangle actually overlaps the exact object named in its instruction; replace any mismatched rectangle.`;
+  }
+
+  function analysisImageDimensions(){
+    const maxSide=1600;
+    const scale=Math.min(1,maxSide/Math.max(state.naturalW,state.naturalH));
+    return {width:Math.max(1,Math.round(state.naturalW*scale)),height:Math.max(1,Math.round(state.naturalH*scale))};
   }
 
   function analysisImageDataUrl(){
-    const maxSide=1600;
-    const scale=Math.min(1,maxSide/Math.max(state.naturalW,state.naturalH));
+    const {width,height}=analysisImageDimensions();
     const canvas=document.createElement('canvas');
-    canvas.width=Math.max(1,Math.round(state.naturalW*scale)); canvas.height=Math.max(1,Math.round(state.naturalH*scale));
-    canvas.getContext('2d').drawImage(state.originalImage,0,0,canvas.width,canvas.height);
-    return canvas.toDataURL('image/jpeg',.9);
+    canvas.width=width; canvas.height=height;
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(state.originalImage,0,0,width,height);
+    ctx.save();
+    ctx.lineWidth=Math.max(1,Math.round(Math.min(width,height)/700));
+    ctx.strokeStyle='rgba(255,255,255,.42)';
+    ctx.fillStyle='rgba(0,0,0,.62)';
+    ctx.font=`bold ${Math.max(11,Math.round(Math.min(width,height)/65))}px system-ui`;
+    for(let step=1;step<10;step++){
+      const x=Math.round(width*step/10),y=Math.round(height*step/10);
+      ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();
+      ctx.fillText((step/10).toFixed(1),x+3,Math.max(13,parseInt(ctx.font,10)));
+      ctx.fillText((step/10).toFixed(1),3,y-3);
+    }
+    ctx.restore();
+    return canvas.toDataURL('image/jpeg',.94);
+  }
+
+  function annotatedRegionsDataUrl(){
+    const {width,height}=analysisImageDimensions();
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+    const ctx=canvas.getContext('2d');ctx.drawImage(state.originalImage,0,0,width,height);
+    const lineWidth=Math.max(3,Math.round(Math.min(width,height)/220));
+    const fontSize=Math.max(16,Math.round(Math.min(width,height)/34));
+    ctx.font=`bold ${fontSize}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';
+    state.regions.forEach((region,index)=>{
+      const x=region.xNorm*width,y=region.yNorm*height,w=region.wNorm*width,h=region.hNorm*height;
+      ctx.fillStyle='rgba(0,0,0,.18)';ctx.fillRect(x,y,w,h);
+      ctx.strokeStyle='#00e5ff';ctx.lineWidth=lineWidth;ctx.strokeRect(x,y,w,h);
+      const radius=fontSize*.72,labelX=clamp(x+radius, radius, width-radius),labelY=clamp(y+radius, radius, height-radius);
+      ctx.fillStyle='#081225';ctx.beginPath();ctx.arc(labelX,labelY,radius,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#00e5ff';ctx.lineWidth=Math.max(2,lineWidth/2);ctx.stroke();
+      ctx.fillStyle='#ffffff';ctx.fillText(String(index+1),labelX,labelY+1);
+    });
+    return canvas.toDataURL('image/jpeg',.94);
+  }
+
+  function verificationPrompt(){
+    const proposed=state.regions.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction},index)=>({number:index+1,xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
+    return `Verify the numbered proposed regions in the newly attached review image against the original image and these instructions: ${JSON.stringify(proposed)}. For every number, confirm that the cyan rectangle visibly overlaps the exact object or body feature named in its instruction. Correct every misplaced rectangle, even if it is near the right person but on the wrong feature. Keep good rectangles unchanged. Return exactly ${expectedCount()} objects as one valid JSON array only, in the same numbered order, with xNorm, yNorm, wNorm, hNorm, changeType, and instruction. The origin is the upper-left of the full image. xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center. wNorm and hNorm are width and height. Frame only the named target feature, not the surrounding person. Neither dimension may exceed 0.22 and each box must cover less than 4% of the image. Before responding, re-check visually that every corrected box overlaps its named target.`;
+  }
+
+  function requestRegionVerification(){
+    if(state.analysisVerificationAttempts>=2)return false;
+    state.analysisVerificationAttempts++;
+    setExtensionStatus('busy','Verifying the numbered regions…');
+    els.aiRunStatus.textContent='Step 1 of 2: checking every box against the feature it names…';
+    setAiProgress(Math.max(state.aiProgressPercent,13));
+    updateRegionList();draw();
+    armJobTimer(240000,`Region verification ${state.analysisVerificationAttempts}`);
+    postToExtension('SPOT_DIFF_VERIFY_ANALYSIS',{jobId:state.activeJobId,imageDataUrl:annotatedRegionsDataUrl(),count:expectedCount(),prompt:verificationPrompt()});
+    return true;
   }
 
   async function runCreatorDiagnostics(){
@@ -493,7 +549,7 @@
     const acceptedJson=accepted.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction})=>({xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
     const reasons=rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')||'The response did not contain enough usable regions.';
     const colorSlots=Math.max(0,2-accepted.filter(region=>region.changeType==='color').length);
-    return `Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only. Each replacement must create a clearly visible but tightly localized difference. Favor substantial additions and replacements to a single facial feature, hand detail, hair detail, clothing detail, or accessory: for example remove a whole mouth or eyebrow, remove one or two clearly visible fingers, change an expression without changing identity, replace glasses, add/remove a hat, change a collar, replace a prominent shirt graphic, or alter a hairstyle detail. Never move a whole arm or leg, change a pose or body position, or turn a raised limb into a lowered limb. Keep it playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like, with no wound, gore, distress, or damaged skin. Do not propose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or mere color changes beyond the remaining allowance. At most ${colorSlots} of these replacements may be color-only. Include changeType as add, replace, remove, color, or detail; use color only for a mere recoloring. Each replacement must identify a new detail that does not overlap any accepted rectangle by more than 20%. Every xNorm, yNorm, wNorm, and hNorm must be numeric from 0 to 1. Both wNorm and hNorm must be greater than 0.018; use 0.025 to 0.12 in each dimension when possible. Neither dimension may exceed 0.22, and each rectangle must cover less than 4% of the image. Frame only the target feature because the editor adds context separately. Do not repeat any accepted target. Accepted regions to avoid: ${JSON.stringify(acceptedJson)}.`;
+    return `Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only. Each replacement must create a clearly visible but tightly localized difference. Favor substantial additions and replacements to a single facial feature, hand detail, hair detail, clothing detail, or accessory: for example remove a whole mouth or eyebrow, remove one or two clearly visible fingers, change an expression without changing identity, replace glasses, add/remove a hat, change a collar, replace a prominent shirt graphic, or alter a hairstyle detail. Never move a whole arm or leg, change a pose or body position, or turn a raised limb into a lowered limb. Keep it playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like, with no wound, gore, distress, or damaged skin. Do not propose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or mere color changes beyond the remaining allowance. At most ${colorSlots} of these replacements may be color-only. Include changeType as add, replace, remove, color, or detail; use color only for a mere recoloring. Coordinate convention is mandatory: origin is upper-left; xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center; wNorm and hNorm are width and height. Each replacement must identify a new detail that does not overlap any accepted rectangle by more than 20%. Every xNorm, yNorm, wNorm, and hNorm must be numeric from 0 to 1. Both wNorm and hNorm must be greater than 0.018; use 0.025 to 0.12 in each dimension when possible. Neither dimension may exceed 0.22, and each rectangle must cover less than 4% of the image. Frame only the target feature because the editor adds context separately. Visually verify every replacement rectangle overlaps the object named in its instruction. Do not repeat any accepted target. Accepted regions to avoid: ${JSON.stringify(acceptedJson)}.`;
   }
 
   function requestMissingRegions(validation){
@@ -525,6 +581,7 @@
     state.aiBusy=true; state.activeJobId=uid('analysis');
     state.workflowPhase='analysis';
     state.analysisRepairAttempts=0;
+    state.analysisVerificationAttempts=0;
     setExtensionStatus('busy','ChatGPT is inspecting the image…');
     setAiProgress(2);
     els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
@@ -535,7 +592,7 @@
   function editPrompt(region,geometry,index){
     const left=Math.round(geometry.targetX/geometry.cropW*100),top=Math.round(geometry.targetY/geometry.cropH*100);
     const right=Math.round((geometry.targetX+geometry.targetW)/geometry.cropW*100),bottom=Math.round((geometry.targetY+geometry.targetH)/geometry.cropH*100);
-    return `Edit this crop for a fun classroom spot-the-difference puzzle. ${region.instruction.trim()} Make the requested feature clearly visible without expanding the edit beyond that feature. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact viewpoint, lighting, texture, color profile, sharpness, and all unrelated details. The target is approximately ${left}%–${right}% across and ${top}%–${bottom}% down; change only that target. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited image only, keeping the same aspect ratio. This is edit ${index+1} of ${state.regions.length}.`;
+    return `Edit this crop for a fun classroom spot-the-difference puzzle. ${region.instruction.trim()} Make the requested feature clearly visible without expanding the edit beyond that feature. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, or reframe the image. Preserve lighting, texture, color profile, sharpness, and all unrelated details. The target is approximately ${left}%–${right}% across and ${top}%–${bottom}% down; change only that target. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited image only, keeping the same aspect ratio. This is edit ${index+1} of ${state.regions.length}.`;
   }
 
   function startAiWorkflow(){
@@ -616,6 +673,7 @@
         if(requestMissingRegions(validation))return;
         state.regions=validation.accepted.slice(0,expectedCount());
         setAiProgress(Math.max(state.aiProgressPercent,14));
+        if(!payload.verified&&requestRegionVerification())return;
         state.appliedPatches.clear(); state.aiBusy=false;
         setExtensionStatus('connected',`${state.regions.length} differences selected`);
         els.aiRunStatus.textContent='Differences selected. Starting image edits automatically…';

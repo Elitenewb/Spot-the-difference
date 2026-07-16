@@ -219,6 +219,15 @@
     return waitForAnalysis(before, beforeTurns);
   }
 
+  async function runVerifyAnalysis(payload) {
+    const before = assistantMessages().length;
+    const beforeTurns = allMatches(SELECTORS.conversationTurn).length;
+    reportProgress(payload, 'uploading', 'Uploading the numbered region review to ChatGPT…');
+    await uploadImage(payload.imageDataUrl, 'spot-regions-review.jpg', payload);
+    await submitPrompt(payload.prompt, payload, before);
+    return waitForAnalysis(before, beforeTurns);
+  }
+
   async function runEdit(payload) {
     const before = assistantMessages().length;
     const beforeUrls = new Set([...document.images].map(image => image.src));
@@ -235,6 +244,10 @@
     }
     if (message.type === 'SD_CHATGPT_REPAIR_ANALYSIS') {
       runRepairAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
+    if (message.type === 'SD_CHATGPT_VERIFY_ANALYSIS') {
+      runVerifyAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
       return true;
     }
     if (message.type === 'SD_CHATGPT_EDIT') {

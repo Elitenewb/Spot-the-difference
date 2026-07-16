@@ -97,6 +97,18 @@ test('replacement analysis continues in the existing chat without opening a fres
   assert.equal(forwarded.at(-1).payload.repair, true);
 });
 
+test('visual region verification stays in the analysis chat and returns a verified result', async () => {
+  const { context, updates, sentMessages } = loadBackgroundHarness();
+  context.chrome.storage.session.get = async () => ({ chatTabId: 42 });
+  const forwarded = [];
+  context.forward = async (_tabId, type, payload) => { forwarded.push({ type, payload }); };
+  await context.runVerifyAnalysis({ jobId: 'verify-job', count: 10, imageDataUrl: 'data:image/jpeg;base64,AAAA', prompt: 'Verify every box.' }, 5);
+  assert.equal(updates.length, 0);
+  assert.equal(sentMessages[0].message.type, 'SD_CHATGPT_VERIFY_ANALYSIS');
+  assert.equal(forwarded.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT');
+  assert.equal(forwarded.at(-1).payload.verified, true);
+});
+
 test('closing the creator or ChatGPT tab cancels the active automation job', async () => {
   const { context, removeListeners } = loadBackgroundHarness();
   const cancelled = [];
