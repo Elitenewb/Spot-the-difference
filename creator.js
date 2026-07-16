@@ -18,8 +18,7 @@
     mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, analysisVerificationAttempts:0,
-    analysisVerificationPasses:0, regionsVerified:false, workflowPhase:'idle', aiProgressPercent:0
+    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -47,7 +46,6 @@
     state.naturalW=0; state.naturalH=0; state.originalImage=null; state.modifiedImage=null; state.originalDataUrl='';
     state.regions=[]; state.appliedPatches.clear(); state.workCanvas.width=0; state.workCanvas.height=0;
     state.uploadRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[];
-    state.analysisVerificationPasses=0; state.regionsVerified=false;
     for(const input of [els.modFile,els.origFile,els.aiOrigFile]) input.value='';
     updateRegionList(); fitCanvasSize();
   }
@@ -118,7 +116,6 @@
     state.naturalW=original.naturalWidth;
     state.naturalH=original.naturalHeight;
     state.regions=[];
-    state.regionsVerified=false;
     state.appliedPatches.clear();
     initializeWorkCanvasFromModified();
     fitCanvasSize();
@@ -180,7 +177,7 @@
     if(state.workCanvas.width&&state.workCanvas.height) ctxModified.drawImage(state.workCanvas,0,0,w,h);
     else if(state.modifiedImage) ctxModified.drawImage(state.modifiedImage,0,0,w,h);
     for(const region of state.regions){
-      if(state.mode==='manual'||state.regionsVerified)drawGuide(els.modCanvas,region);
+      drawGuide(els.modCanvas,region);
       if(state.mode==='manual')drawGuide(els.origCanvas,region);
     }
     if(state.dragging&&state.dragStart&&state.dragCurrent){
@@ -258,7 +255,6 @@
         item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span><span class="region-state ${stateClass}">${escapeHtml(region.status||'pending')}</span></div><textarea aria-label="Edit instruction for region ${index+1}">${escapeHtml(region.instruction||defaultInstruction())}</textarea><div class="region-actions"><button data-action="select">Show</button></div>`;
         item.querySelector('textarea').addEventListener('input',event=>{ region.instruction=event.target.value; updateControls(); });
         item.querySelector('textarea').disabled=!['pending','queued'].includes(region.status||'pending');
-        item.querySelector('[data-action="select"]').disabled=!state.regionsVerified;
       }else{
         item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span></div><div class="region-actions"><button data-action="select">Show</button><button data-action="remove" class="danger">Remove</button></div>`;
       }
@@ -292,13 +288,12 @@
     else if(allEditsDone)els.analyzeBtn.textContent='Puzzle ready';
     else if(!state.originalImage)els.analyzeBtn.textContent='Upload a photo first';
     else if(!state.extensionConnected)els.analyzeBtn.textContent='Waiting for connection';
-    else if(state.regions.length===expectedCount()&&!state.regionsVerified)els.analyzeBtn.textContent='Retry region check';
     else if(state.regions.length===expectedCount())els.analyzeBtn.textContent='Continue generation';
     else els.analyzeBtn.textContent='Generate puzzle';
     els.analyzeBtn.disabled=state.aiBusy?false:(!aiReady||allEditsDone);
     els.analyzeBtn.classList.toggle('danger',state.aiBusy);
     els.analyzeBtn.classList.toggle('primary',!state.aiBusy);
-    els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regionsVerified&&state.regions.some(region=>region.status!=='done'));
+    els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regions.some(region=>region.status!=='done'));
     els.exportBtn.disabled=!(hasImages&&countMatches);
     els.downloadImageBtn.disabled=!hasImages;
     els.downloadBothBtn.disabled=!(hasImages&&countMatches);
@@ -424,64 +419,6 @@
     return canvas.toDataURL('image/jpeg',.94);
   }
 
-  function drawCoordinateGrid(ctx,width,height){
-    ctx.save();
-    const fontSize=Math.max(11,Math.round(Math.min(width,height)/72));
-    ctx.font=`bold ${fontSize}px system-ui`;
-    ctx.lineWidth=Math.max(1,Math.round(Math.min(width,height)/900));
-    for(let step=1;step<20;step++){
-      const fraction=step/20,x=Math.round(width*fraction),y=Math.round(height*fraction);
-      const major=step%2===0;
-      ctx.strokeStyle=major?'rgba(255,255,255,.44)':'rgba(255,255,255,.22)';
-      ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();
-      if(major){
-        ctx.fillStyle='rgba(0,0,0,.72)';
-        ctx.fillText(fraction.toFixed(2),x+3,fontSize+2);
-        ctx.fillText(fraction.toFixed(2),3,y-3);
-      }
-    }
-    ctx.restore();
-  }
-
-  function annotatedRegionsDataUrl(){
-    const {width,height}=analysisImageDimensions();
-    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
-    const ctx=canvas.getContext('2d');ctx.drawImage(state.originalImage,0,0,width,height);
-    drawCoordinateGrid(ctx,width,height);
-    const lineWidth=Math.max(3,Math.round(Math.min(width,height)/220));
-    const fontSize=Math.max(16,Math.round(Math.min(width,height)/34));
-    ctx.font=`bold ${fontSize}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';
-    state.regions.forEach((region,index)=>{
-      const x=region.xNorm*width,y=region.yNorm*height,w=region.wNorm*width,h=region.hNorm*height;
-      ctx.fillStyle='rgba(0,0,0,.18)';ctx.fillRect(x,y,w,h);
-      ctx.strokeStyle='#00e5ff';ctx.lineWidth=lineWidth;ctx.strokeRect(x,y,w,h);
-      const radius=fontSize*.72,labelX=clamp(x+radius, radius, width-radius),labelY=clamp(y+radius, radius, height-radius);
-      ctx.fillStyle='#081225';ctx.beginPath();ctx.arc(labelX,labelY,radius,0,Math.PI*2);ctx.fill();
-      ctx.strokeStyle='#00e5ff';ctx.lineWidth=Math.max(2,lineWidth/2);ctx.stroke();
-      ctx.fillStyle='#ffffff';ctx.fillText(String(index+1),labelX,labelY+1);
-    });
-    return canvas.toDataURL('image/jpeg',.94);
-  }
-
-  function verificationPrompt(){
-    const proposed=state.regions.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction},index)=>({number:index+1,xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
-    return `Verify the numbered proposed regions in the newly attached review image against the original image and these instructions: ${JSON.stringify(proposed)}. The faint coordinate grid is spaced every 0.05; darker labeled lines are spaced every 0.10. Treat each cyan rectangle as the exact pixel-change mask, not as a pointer identifying the student. Assume every box is wrong until you have checked all four cyan edges against the visible feature. A box that merely overlaps its target, clips part of it, sits above or beside it, or includes unrelated face, body, or background pixels must be corrected. For every number, confirm that the rectangle covers every pixel area needed to perform its instruction while excluding unrelated pixels. Correct every misplaced or unsuitable rectangle, even if it identifies the right person. For additions, the rectangle must enclose the destination space where the new object will appear plus its attachment point. A baseball cap or hat requires the crown/top of the head and space above it, not the face. Glasses require all of both lenses and the bridge, not the forehead above them. A hand gesture requires the hand and fingers. Keep a rectangle unchanged only after checking its top, right, bottom, and left edges. Return exactly ${expectedCount()} objects as one valid JSON array only, in the same numbered order, with xNorm, yNorm, wNorm, hNorm, changeType, instruction, and targetCheck. targetCheck must specifically name the visible pixels at the box's top, right, bottom, and left edges and explain why the whole requested feature fits; generic claims such as box is correct are invalid. The origin is the upper-left of the full image. xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center. wNorm and hNorm are width and height. Frame only the actual change pixels, not the surrounding person. Neither dimension may exceed 0.22 and each box must cover less than 4% of the image. Before responding, re-check visually that every corrected box is appropriate for its requested edit.`;
-  }
-
-  function requestRegionVerification(){
-    if(state.analysisVerificationAttempts>=4)return false;
-    state.analysisVerificationAttempts++;
-    state.regionsVerified=false;
-    setExtensionStatus('busy','Verifying the numbered regions…');
-    els.aiRunStatus.textContent='Step 1 of 2: checking every box against the feature it names…';
-    setAiProgress(Math.max(state.aiProgressPercent,13));
-    updateRegionList();draw();
-    armJobTimer(240000,`Region verification ${state.analysisVerificationAttempts}`);
-    postToExtension('SPOT_DIFF_VERIFY_ANALYSIS',{jobId:state.activeJobId,imageDataUrl:annotatedRegionsDataUrl(),count:expectedCount(),prompt:verificationPrompt()});
-    return true;
-  }
-
   async function runCreatorDiagnostics(){
     const results=[];
     const expect=(name,condition)=>results.push(`${condition?'PASS':'FAIL'}: ${name}`);
@@ -532,7 +469,7 @@
     return 'detail';
   }
 
-  function validateSuggestedRegions(raw,accepted=[],requireTargetCheck=false){
+  function validateSuggestedRegions(raw,accepted=[]){
     const items=Array.isArray(raw)?raw:Array.isArray(raw?.regions)?raw.regions:[];
     const normalized=[...accepted],rejected=[];
     for(const [index,item] of items.entries()){
@@ -540,8 +477,7 @@
       const largest=Math.max(...values);
       const scale=largest>1?(largest<=100?100:1000):1;
       const instruction=String(item.instruction||item.prompt||defaultInstruction());
-      const targetCheck=String(item.targetCheck||'').trim();
-      const region={id:uid(),xNorm:values[0]/scale,yNorm:values[1]/scale,wNorm:values[2]/scale,hNorm:values[3]/scale,instruction,targetCheck,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
+      const region={id:uid(),xNorm:values[0]/scale,yNorm:values[1]/scale,wNorm:values[2]/scale,hNorm:values[3]/scale,instruction,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
       let reason='';
       if(!values.every(Number.isFinite))reason='coordinates must all be numeric';
       else if(region.wNorm<=.018)reason=`width ${region.wNorm.toFixed(4)} is not greater than 0.018`;
@@ -549,9 +485,6 @@
       else if(region.xNorm<0||region.yNorm<0||region.xNorm+region.wNorm>1||region.yNorm+region.hNorm>1)reason='rectangle extends outside the image';
       else if(region.wNorm>.22||region.hNorm>.22)reason='rectangle is too wide or tall for a localized difference';
       else if(region.wNorm*region.hNorm>=.04)reason='rectangle covers 4% or more of the image';
-      else if(requireTargetCheck&&targetCheck.length<24)reason='visual verification did not explain why the rectangle fits the requested edit';
-      else if(requireTargetCheck&&![/\btop\b/i,/\bright\b/i,/\bbottom\b/i,/\bleft\b/i].every(pattern=>pattern.test(targetCheck)))reason='visual verification did not describe all four rectangle edges';
-      else if(requireTargetCheck&&/\b(?:cap|hat)\b/i.test(region.instruction)&&!/(?:top|crown|above|hair|head)/i.test(targetCheck))reason='hat or cap region was not verified against the top of the head and destination space';
       else if(normalized.some(existing=>regionOverlap(existing,region)>.2))reason='rectangle overlaps an accepted suggestion by more than 20%';
       else if(region.changeType==='color'&&normalized.filter(existing=>existing.changeType==='color').length>=2)reason='the set already contains the maximum of two color-only changes';
       else if(/\b(?:tiny|ring|pin|magnet|hyphen|punctuation|single shoelace|one shoelace|watch face|isolated button)\b/i.test(region.instruction))reason='the proposed change is too small to find at normal viewing size';
@@ -599,9 +532,6 @@
     state.aiBusy=true; state.activeJobId=uid('analysis');
     state.workflowPhase='analysis';
     state.analysisRepairAttempts=0;
-    state.analysisVerificationAttempts=0;
-    state.analysisVerificationPasses=0;
-    state.regionsVerified=false;
     setExtensionStatus('busy','ChatGPT is inspecting the image…');
     setAiProgress(2);
     els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
@@ -618,20 +548,18 @@
   function startAiWorkflow(){
     if(state.aiBusy)return;
     const pending=state.regions.filter(region=>region.status!=='done');
-    if(state.regionsVerified&&state.regions.length===expectedCount()&&pending.length)startEditQueue(pending);
+    if(state.regions.length===expectedCount()&&pending.length)startEditQueue(pending);
     else startAnalysis();
   }
 
   function startGeneration(){
     if(state.aiBusy)return;
-    if(state.mode==='ai'&&!state.regionsVerified)return;
     const pending=state.regions.filter(region=>region.status!=='done');
     startEditQueue(pending);
   }
 
   function startEditQueue(regions){
     if(state.aiBusy||!state.extensionConnected||!regions.length)return;
-    if(state.mode==='ai'&&!state.regionsVerified)return;
     state.aiBusy=true; state.activeJobId=uid('edit'); state.workflowPhase='editing'; setAiProgress(15);
     setExtensionStatus('busy','ChatGPT edit queue is running…');
     els.aiRunStatus.textContent=`Preparing ${regions.length} crop edit${regions.length===1?'':'s'}…`;
@@ -691,21 +619,10 @@
     if(type==='SPOT_DIFF_ANALYSIS_RESULT'&&payload?.jobId===state.activeJobId){
       try{
         clearJobTimer();
-        const validation=validateSuggestedRegions(payload.regions,payload.repair?state.regions:[],!!payload.verified);
-        if(requestMissingRegions(validation)){
-          state.analysisVerificationPasses=0;
-          state.regionsVerified=false;
-          return;
-        }
+        const validation=validateSuggestedRegions(payload.regions,payload.repair?state.regions:[]);
+        if(requestMissingRegions(validation))return;
         state.regions=validation.accepted.slice(0,expectedCount());
         setAiProgress(Math.max(state.aiProgressPercent,14));
-        if(payload.verified)state.analysisVerificationPasses++;
-        else state.analysisVerificationPasses=0;
-        if(state.analysisVerificationPasses<2){
-          if(requestRegionVerification())return;
-          throw new Error('The proposed regions could not complete two visual alignment checks. No edits were started.');
-        }
-        state.regionsVerified=true;
         state.appliedPatches.clear(); state.aiBusy=false;
         setExtensionStatus('connected',`${state.regions.length} differences selected`);
         els.aiRunStatus.textContent='Differences selected. Starting image edits automatically…';
