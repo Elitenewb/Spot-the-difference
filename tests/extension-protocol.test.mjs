@@ -130,7 +130,14 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes("if(type==='SPOT_DIFF_JOB_CANCELLED'"));
   assert.ok(creatorHtml.includes('id="aiProgressText">0%</span>'));
   assert.ok(creatorHtml.includes('body.ai-simple #origCard{display:none}'));
-  assert.ok(creator.includes("if(state.mode==='manual')for(const region of state.regions)"));
+  assert.ok(creator.includes('drawGuide(els.modCanvas,region)'));
+  assert.ok(creator.includes("if(state.mode==='manual')drawGuide(els.origCanvas,region)"));
+  assert.ok(creator.includes("state.editQueue=regions.map(region=>{region.status='queued';return region.id;})"));
+  assert.ok(creator.includes('prompt:editPrompt(region,crop.geometry'));
+  assert.ok(creator.includes("textarea').disabled=!['pending','queued'].includes"));
+  assert.ok(!creator.includes('data-action="generate"'));
+  assert.ok(!creator.includes('data-action="download"'));
+  assert.ok(!creator.includes('data-action="upload"'));
   assert.ok(creator.includes("if(state.mode==='ai'||!state.naturalW"));
   assert.ok(creator.includes('function editStageProgress(stage)'));
   assert.ok(creator.includes("setAiProgress(15+(state.editCompleted/state.editTotal)*85)"));

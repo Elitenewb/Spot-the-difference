@@ -176,7 +176,10 @@
     if(state.originalImage) ctxOriginal.drawImage(state.originalImage,0,0,w,h);
     if(state.workCanvas.width&&state.workCanvas.height) ctxModified.drawImage(state.workCanvas,0,0,w,h);
     else if(state.modifiedImage) ctxModified.drawImage(state.modifiedImage,0,0,w,h);
-    if(state.mode==='manual')for(const region of state.regions){ drawGuide(els.modCanvas,region); drawGuide(els.origCanvas,region); }
+    for(const region of state.regions){
+      drawGuide(els.modCanvas,region);
+      if(state.mode==='manual')drawGuide(els.origCanvas,region);
+    }
     if(state.dragging&&state.dragStart&&state.dragCurrent){
       const preview=normToRect(state.dragStart,state.dragCurrent);
       drawDragPreview(els.modCanvas,preview); drawDragPreview(els.origCanvas,preview);
@@ -240,6 +243,8 @@
   function regionSummary(region){ return `${(region.xNorm*100).toFixed(1)}%, ${(region.yNorm*100).toFixed(1)}% · ${(region.wNorm*100).toFixed(1)}×${(region.hNorm*100).toFixed(1)}%`; }
 
   function updateRegionList(){
+    const focusedRegion=document.activeElement?.closest?.('.region-item')?.dataset.id;
+    const focusedSelection=document.activeElement?.tagName==='TEXTAREA'?[document.activeElement.selectionStart,document.activeElement.selectionEnd]:null;
     els.regionCount.textContent=`${state.regions.length} / ${expectedCount()}`;
     if(!state.regions.length){ els.regionList.innerHTML='<div class="region-empty">Drag rectangles on the modified image or ask ChatGPT to suggest them.</div>'; updateControls(); return; }
     els.regionList.innerHTML='';
@@ -247,9 +252,9 @@
       const item=document.createElement('div'); item.className='region-item'; item.dataset.id=region.id;
       const stateClass=region.status==='done'?'done':region.status==='error'?'error':'';
       if(state.mode==='ai'){
-        item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span><span class="region-state ${stateClass}">${escapeHtml(region.status||'pending')}</span></div><textarea aria-label="Edit instruction for region ${index+1}">${escapeHtml(region.instruction||defaultInstruction())}</textarea><div class="region-actions"><button data-action="select">Show</button><button data-action="generate">Generate</button><button data-action="download">Crop</button><button data-action="upload">Upload edit</button><button data-action="remove" class="danger">Remove</button></div>`;
+        item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span><span class="region-state ${stateClass}">${escapeHtml(region.status||'pending')}</span></div><textarea aria-label="Edit instruction for region ${index+1}">${escapeHtml(region.instruction||defaultInstruction())}</textarea><div class="region-actions"><button data-action="select">Show</button></div>`;
         item.querySelector('textarea').addEventListener('input',event=>{ region.instruction=event.target.value; updateControls(); });
-        item.querySelector('[data-action="generate"]').disabled=state.aiBusy||!state.extensionConnected||String(region.instruction||'').trim().length<=5;
+        item.querySelector('textarea').disabled=!['pending','queued'].includes(region.status||'pending');
       }else{
         item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span></div><div class="region-actions"><button data-action="select">Show</button><button data-action="remove" class="danger">Remove</button></div>`;
       }
@@ -258,13 +263,13 @@
         if(state.aiBusy&&action!=='select')return;
         if(action==='select'){ state.uploadRegionId=region.id; draw(); item.scrollIntoView({block:'nearest'}); }
         if(action==='remove'){ state.appliedPatches.delete(region.id); state.regions=state.regions.filter(r=>r.id!==region.id); recomposeAllPatches(); updateRegionList(); draw(); }
-        if(action==='download') downloadCrop(region);
-        if(action==='generate') startEditQueue([region]);
-        if(action==='upload'){ state.uploadRegionId=region.id; els.patchUpload.value=''; els.patchUpload.click(); draw(); }
       });
       els.regionList.appendChild(item);
-      if(state.aiBusy) item.querySelectorAll('button:not([data-action="select"]), textarea').forEach(control=>{ control.disabled=true; });
     });
+    if(focusedRegion&&focusedSelection){
+      const textarea=[...els.regionList.querySelectorAll('.region-item')].find(item=>item.dataset.id===focusedRegion)?.querySelector('textarea');
+      if(textarea&&!textarea.disabled){textarea.focus();textarea.setSelectionRange(...focusedSelection);}
+    }
     updateControls();
   }
 
@@ -549,24 +554,24 @@
     state.aiBusy=true; state.activeJobId=uid('edit'); state.workflowPhase='editing'; setAiProgress(15);
     setExtensionStatus('busy','ChatGPT edit queue is running…');
     els.aiRunStatus.textContent=`Preparing ${regions.length} crop edit${regions.length===1?'':'s'}…`;
-    state.editQueue=regions.map(region=>{
-      const crop=makeCrop(region);
-      region.status='queued';
-      return {regionId:region.id,imageDataUrl:crop.dataUrl,prompt:editPrompt(region,crop.geometry,state.regions.indexOf(region))};
-    });
+    state.editQueue=regions.map(region=>{region.status='queued';return region.id;});
     state.editCompleted=0; state.editTotal=state.editQueue.length;
     updateRegionList(); updateControls();
     sendNextEdit();
   }
 
   function sendNextEdit(){
-    const edit=state.editQueue[0];
-    if(!edit){
+    const regionId=state.editQueue[0];
+    if(!regionId){
       clearJobTimer(); state.aiBusy=false; state.workflowPhase='complete'; setAiProgress(100); setExtensionStatus('connected','Edit queue complete');
       els.aiRunStatus.textContent='Puzzle complete. Download both files in step 3.'; updateRegionList(); updateControls();
       return;
     }
-    const region=state.regions.find(item=>item.id===edit.regionId); if(region)region.status='editing';
+    const region=state.regions.find(item=>item.id===regionId);
+    if(!region){state.editQueue.shift();sendNextEdit();return;}
+    const crop=makeCrop(region);
+    const edit={regionId:region.id,imageDataUrl:crop.dataUrl,prompt:editPrompt(region,crop.geometry,state.regions.indexOf(region))};
+    region.status='editing';
     els.aiRunStatus.textContent=`Step 2 of 2: creating difference ${state.editCompleted+1} of ${state.editTotal}…`;
     updateRegionList();
     armJobTimer(360000,`Edit ${state.editCompleted+1}`);
