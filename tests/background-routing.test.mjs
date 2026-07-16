@@ -9,12 +9,17 @@ function loadBackgroundHarness() {
   const sentMessages = [];
   const updateListeners = new Set();
   const removeListeners = new Set();
+  const sessionStore = {};
   const chrome = {
     storage: {
       session: {
-        async get() { return {}; },
-        async set() {},
-        async remove() {}
+        async get(keys) {
+          if (keys == null) return { ...sessionStore };
+          const requested = Array.isArray(keys) ? keys : [keys];
+          return Object.fromEntries(requested.filter(key => key in sessionStore).map(key => [key, sessionStore[key]]));
+        },
+        async set(values) { Object.assign(sessionStore, values); },
+        async remove(keys) { for (const key of (Array.isArray(keys) ? keys : [keys])) delete sessionStore[key]; }
       }
     },
     tabs: {
@@ -44,7 +49,7 @@ function loadBackgroundHarness() {
   const context = { chrome, setTimeout: fastSetTimeout, clearTimeout, queueMicrotask, fetch, Uint8Array, btoa };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8'), context);
-  return { context, updates, creations, sentMessages, removeListeners };
+  return { context, updates, creations, sentMessages, removeListeners, sessionStore };
 }
 
 test('analysis uses temporary chat while crop editing uses regular chat', async () => {
@@ -83,6 +88,17 @@ test('fresh-chat runner retries once after losing its ChatGPT tab', async () => 
   assert.equal(sends, 16);
 });
 
+test('active job routing survives service worker memory loss', async () => {
+  const { context, sessionStore } = loadBackgroundHarness();
+  await context.rememberActiveJob(42, { appTabId: 5, jobId: 'durable-job', kind: 'analysis' });
+  assert.equal(sessionStore['activeJob:42'].jobId, 'durable-job');
+  vm.runInContext('activeJobs.clear()', context);
+  const recovered = await context.activeJobFor(42);
+  assert.equal(recovered.appTabId, 5);
+  assert.equal(recovered.jobId, 'durable-job');
+  assert.equal(recovered.kind, 'analysis');
+});
+
 test('replacement analysis continues in the existing chat without opening a fresh one', async () => {
   const { context, updates, sentMessages } = loadBackgroundHarness();
   context.chrome.storage.session.get = async () => ({ chatTabId: 42 });
@@ -117,7 +133,7 @@ test('closing the creator or ChatGPT tab cancels the active automation job', asy
   const cancelled = [];
   context.cancelJob = async (jobId, appTabId) => { cancelled.push({ jobId, appTabId }); };
   vm.runInContext("activeJobs.set(42, { jobId: 'stuck-job', appTabId: 5, kind: 'edit' })", context);
-  for (const listener of removeListeners) listener(42);
+  for (const listener of removeListeners) await listener(42);
   assert.deepEqual(cancelled, [{ jobId: 'stuck-job', appTabId: 5 }]);
 });
 

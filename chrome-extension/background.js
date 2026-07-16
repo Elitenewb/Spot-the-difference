@@ -2,8 +2,42 @@
 
 const CHATGPT_URL = 'https://chatgpt.com/';
 const activeJobs = new Map();
+const ACTIVE_JOB_PREFIX = 'activeJob:';
 const cancelledJobIds = new Set();
 const intentionallyClosedTabs = new Set();
+
+function activeJobKey(tabId) { return `${ACTIVE_JOB_PREFIX}${tabId}`; }
+
+async function rememberActiveJob(tabId, job) {
+  activeJobs.set(tabId, job);
+  await chrome.storage.session.set({ [activeJobKey(tabId)]: job });
+}
+
+async function activeJobFor(tabId) {
+  const current = activeJobs.get(tabId);
+  if (current) return current;
+  const saved = await chrome.storage.session.get(activeJobKey(tabId));
+  const job = saved[activeJobKey(tabId)];
+  if (job) activeJobs.set(tabId, job);
+  return job;
+}
+
+async function forgetActiveJob(tabId) {
+  activeJobs.delete(tabId);
+  await chrome.storage.session.remove(activeJobKey(tabId));
+}
+
+async function activeJobEntries() {
+  const saved = await chrome.storage.session.get(null);
+  const jobs = new Map();
+  for (const [key, job] of Object.entries(saved)) {
+    if (!key.startsWith(ACTIVE_JOB_PREFIX)) continue;
+    const tabId = Number(key.slice(ACTIVE_JOB_PREFIX.length));
+    if (Number.isInteger(tabId) && job) jobs.set(tabId, job);
+  }
+  for (const [tabId, job] of activeJobs) jobs.set(tabId, job);
+  return [...jobs.entries()];
+}
 
 function validText(value, max) { return typeof value === 'string' && value.length > 0 && value.length <= max; }
 function validImage(value) { return validText(value, 25_000_000) && /^data:image\/(?:png|jpeg|webp);base64,/i.test(value); }
@@ -46,7 +80,7 @@ async function getChatGptTab() {
 
 async function discardChatGptTab(tabId) {
   await chrome.storage.session.remove('chatTabId');
-  activeJobs.delete(tabId);
+  await forgetActiveJob(tabId);
   intentionallyClosedTabs.add(tabId);
   try { await chrome.tabs.remove(tabId); } catch (_) {}
 }
@@ -56,7 +90,7 @@ function jobWasCancelled(job) { return cancelledJobIds.has(job?.jobId); }
 async function cancelJob(jobId, appTabId) {
   if (!validText(jobId, 120)) return;
   cancelledJobIds.add(jobId);
-  const matchingTabs = [...activeJobs.entries()]
+  const matchingTabs = (await activeJobEntries())
     .filter(([, job]) => job.jobId === jobId && (!appTabId || job.appTabId === appTabId))
     .map(([tabId]) => tabId);
   await Promise.all(matchingTabs.map(tabId => discardChatGptTab(tabId)));
@@ -95,7 +129,7 @@ async function runInFreshChat(message, job, temporary = true) {
     try {
       await openFreshChat(tab.id, temporary);
       if (jobWasCancelled(job)) { await discardChatGptTab(tab.id); throw new Error('Current ChatGPT job cancelled.'); }
-      activeJobs.set(tab.id, job);
+      await rememberActiveJob(tab.id, job);
       const response = await sendToChatGpt(tab.id, message);
       if (jobWasCancelled(job)) throw new Error('Current ChatGPT job cancelled.');
       return response;
@@ -127,7 +161,7 @@ async function runAnalysis(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of await activeJobEntries()) if (job.jobId === payload.jobId && job.kind === 'analysis') await forgetActiveJob(tabId);
   }
 }
 
@@ -136,7 +170,7 @@ async function runRepairAnalysis(payload, appTabId) {
   try {
     cancelledJobIds.delete(payload.jobId);
     const tab = await getChatGptTab();
-    activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-repair' });
+    await rememberActiveJob(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-repair' });
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: `Requesting ${payload.count} replacement suggestion${payload.count === 1 ? '' : 's'}…`, completed: 0, total: 1 });
     const response = await sendToChatGpt(tab.id, { type: 'SD_CHATGPT_REPAIR_ANALYSIS', payload });
     if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the replacement task.');
@@ -144,7 +178,7 @@ async function runRepairAnalysis(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-repair') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of await activeJobEntries()) if (job.jobId === payload.jobId && job.kind === 'analysis-repair') await forgetActiveJob(tabId);
   }
 }
 
@@ -152,7 +186,7 @@ async function runVerifyAnalysis(payload, appTabId) {
   let started = false;
   try {
     const tab = await getChatGptTab();
-    activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-verify' });
+    await rememberActiveJob(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-verify' });
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: 'ChatGPT is checking every numbered region against its target…', completed: 0, total: 1 });
     const response = await sendToChatGpt(tab.id, { type: 'SD_CHATGPT_VERIFY_ANALYSIS', payload });
     if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the verification task.');
@@ -160,7 +194,7 @@ async function runVerifyAnalysis(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-verify') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of await activeJobEntries()) if (job.jobId === payload.jobId && job.kind === 'analysis-verify') await forgetActiveJob(tabId);
   }
 }
 
@@ -180,12 +214,12 @@ async function runEdit(payload, appTabId) {
   } catch (error) {
     if (!cancelledJobIds.has(jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId, message: error.message });
   } finally {
-    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === jobId && job.kind === 'edit') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of await activeJobEntries()) if (job.jobId === jobId && job.kind === 'edit') await forgetActiveJob(tabId);
   }
 }
 
 async function handleTaskResult(payload, chatTabId) {
-  const job = activeJobs.get(chatTabId);
+  const job = await activeJobFor(chatTabId);
   if (!job || payload?.jobId !== job.jobId || payload?.kind !== job.kind) return false;
   try {
     if (jobWasCancelled(job)) return true;
@@ -207,7 +241,7 @@ async function handleTaskResult(payload, chatTabId) {
     if (!cancelledJobIds.has(job.jobId)) await forward(job.appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: job.jobId, message: error.message });
     return true;
   } finally {
-    activeJobs.delete(chatTabId);
+    await forgetActiveJob(chatTabId);
   }
 }
 
@@ -230,14 +264,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
   if (message.type === 'SD_CHATGPT_PROGRESS') {
-    const job = activeJobs.get(sender.tab.id);
-    if (job && message.payload?.jobId === job.jobId) {
-      forward(job.appTabId, 'SPOT_DIFF_AI_PROGRESS', {
-        ...message.payload,
-        kind: job.kind,
-        regionId: message.payload.regionId || job.regionId
-      });
-    }
+    activeJobFor(sender.tab.id).then(job => {
+      if (job && message.payload?.jobId === job.jobId) {
+        forward(job.appTabId, 'SPOT_DIFF_AI_PROGRESS', {
+          ...message.payload,
+          kind: job.kind,
+          regionId: message.payload.regionId || job.regionId
+        });
+      }
+    }).catch(() => {});
     return;
   }
   if (message.type === 'SD_CHATGPT_TASK_RESULT') {
@@ -270,14 +305,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-chrome.tabs.onRemoved.addListener(tabId => {
+chrome.tabs.onRemoved.addListener(async tabId => {
   if (intentionallyClosedTabs.has(tabId)) return;
-  const job = activeJobs.get(tabId);
+  const job = await activeJobFor(tabId);
   if (job) {
     cancelJob(job.jobId, job.appTabId);
     return;
   }
-  for (const activeJob of activeJobs.values()) {
+  for (const [, activeJob] of await activeJobEntries()) {
     if (activeJob.appTabId === tabId) cancelJob(activeJob.jobId, tabId);
   }
 });

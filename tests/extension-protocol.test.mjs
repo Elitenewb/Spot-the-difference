@@ -107,6 +107,12 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(adapter.includes("sendResponse({ accepted: true })"));
   assert.ok(background.includes("message.type === 'SD_CHATGPT_TASK_RESULT'"));
   assert.ok(background.includes('async function handleTaskResult(payload, chatTabId)'));
+  assert.ok(background.includes("const ACTIVE_JOB_PREFIX = 'activeJob:'"));
+  assert.ok(background.includes('async function rememberActiveJob(tabId, job)'));
+  assert.ok(background.includes('chrome.storage.session.set({ [activeJobKey(tabId)]: job })'));
+  assert.ok(background.includes('async function activeJobFor(tabId)'));
+  assert.ok(background.includes('const job = await activeJobFor(chatTabId)'));
+  assert.ok(background.includes('await forgetActiveJob(chatTabId)'));
   assert.ok(adapter.includes("input.files?.length !== 1"));
   assert.ok(adapter.includes('attachmentPreview'));
   assert.ok(adapter.includes('composerAttachmentReady(name)'));
