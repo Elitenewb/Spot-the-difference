@@ -5,44 +5,68 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Spot the Difference</title>
   <style>
+    * { box-sizing: border-box; }
     body {
-      font-family: Arial, sans-serif;
-      height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
       margin: 0;
       display: flex;
       justify-content: center;
       align-items: center;
-      background: #f4f4f4;
+      padding: 24px;
+      color: #e9ecf1;
+      background: radial-gradient(circle at top, #1d2440, #0b0e1a 65%);
     }
     .container {
       text-align: center;
+      width: min(760px, 100%);
     }
     h1 {
-      margin-bottom: 30px;
+      margin: 0 0 12px;
       letter-spacing: 1px;
       font-weight: bold;
+      font-size: clamp(2.25rem, 8vw, 4.75rem);
+      line-height: 1;
+    }
+    p {
+      max-width: 580px;
+      margin: 0 auto 34px;
+      color: #a7b0c0;
+      font-size: 1.05rem;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
     }
     a {
-      display: inline-block;
-      margin: 10px 15px;
-      padding: 15px 30px;
+      display: block;
+      padding: 24px;
       text-decoration: none;
-      color: #fff;
-      background: #333;
-      border-radius: 6px;
-      font-size: 18px;
-      transition: background 0.2s ease;
+      color: #e9ecf1;
+      background: #171a2b;
+      border: 1px solid #2b3152;
+      border-radius: 16px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
     }
-    a:hover {
-      background: #000;
+    a span { display: block; margin-top: 6px; color: #a7b0c0; font-size: .85rem; font-weight: 400; }
+    a:hover { transform: translateY(-2px); border-color: #7bd4ff; background: #1d2238; }
+    a:focus-visible { outline: 3px solid #7bd4ff; outline-offset: 4px; }
+    @media (max-width: 560px) {
+      .actions { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Spot the Difference</h1>
-    <a href="creator.html">Creator</a>
-    <a href="player.html">Player</a>
+    <p>Create a puzzle from an edited image pair or generate subtle crop-by-crop changes with ChatGPT, then race to find them all.</p>
+    <div class="actions">
+      <a href="creator.html">Create a puzzle<span>Manual upload or AI-assisted editing</span></a>
+      <a href="player.html">Play a puzzle<span>Load a puzzle and start spotting</span></a>
+    </div>
   </div>
 </body>
 </html>

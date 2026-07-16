@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="wall" x2="0" y2="1"><stop stop-color="#e8dcc6"/><stop offset="1" stop-color="#cbbd9f"/></linearGradient>
+    <linearGradient id="floor" x2="0" y2="1"><stop stop-color="#8b735b"/><stop offset="1" stop-color="#5c4939"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-opacity=".25"/></filter>
+  </defs>
+  <rect width="1200" height="470" fill="url(#wall)"/>
+  <rect y="470" width="1200" height="205" fill="url(#floor)"/>
+  <path d="M0 470h1200" stroke="#4a3d31" stroke-width="12"/>
+  <rect x="70" y="65" width="680" height="300" rx="8" fill="#614d3d" filter="url(#shadow)"/>
+  <rect x="88" y="83" width="644" height="264" rx="3" fill="#264f46"/>
+  <text x="410" y="140" text-anchor="middle" fill="#f4efe0" font-family="sans-serif" font-size="34" font-weight="bold">TODAY'S CHALLENGE</text>
+  <text x="150" y="205" fill="#f4efe0" font-family="sans-serif" font-size="24">1. Observe carefully</text>
+  <text x="150" y="250" fill="#f4efe0" font-family="sans-serif" font-size="24">2. Work as a team</text>
+  <text x="150" y="295" fill="#f4efe0" font-family="sans-serif" font-size="24">3. Find 10 changes</text>
+  <circle cx="655" cy="280" r="35" fill="none" stroke="#f4efe0" stroke-width="4"/>
+  <path d="M655 280l18-18M655 280v-25" stroke="#f4efe0" stroke-width="4" stroke-linecap="round"/>
+  <rect x="810" y="55" width="310" height="250" rx="6" fill="#f6f0df" stroke="#715d46" stroke-width="10" filter="url(#shadow)"/>
+  <text x="965" y="105" text-anchor="middle" fill="#355168" font-family="sans-serif" font-size="26" font-weight="bold">SCIENCE CLUB</text>
+  <circle cx="900" cy="175" r="43" fill="#72a85e"/>
+  <path d="M875 175h50M900 150v50" stroke="#fff" stroke-width="9"/>
+  <path d="M1000 145l70 65m0-65l-70 65" stroke="#d56352" stroke-width="14" stroke-linecap="round"/>
+  <rect x="825" y="335" width="270" height="115" rx="5" fill="#917250" filter="url(#shadow)"/>
+  <rect x="845" y="315" width="52" height="62" rx="4" fill="#487a5e"/>
+  <path d="M858 315q-25-42 10-62q27 28 4 62m10 0q4-43 40-50q8 39-25 58" fill="#5e9959"/>
+  <rect x="945" y="365" width="80" height="52" rx="8" fill="#d5d1c5"/>
+  <path d="M1025 376q35 0 25 25q-6 15-25 7" fill="none" stroke="#d5d1c5" stroke-width="9"/>
+  <rect x="1015" y="330" width="58" height="24" rx="3" fill="#d9a643"/>
+  <rect x="1007" y="307" width="58" height="23" rx="3" fill="#4f76a6"/>
+  <rect x="1000" y="284" width="58" height="23" rx="3" fill="#a95255"/>
+  <g filter="url(#shadow)">
+    <path d="M85 535h365l-32 78H112z" fill="#b58a5f"/>
+    <path d="M125 608v60m260-60v60" stroke="#48392e" stroke-width="18"/>
+    <path d="M515 510h350l28 83H490z" fill="#ae8259"/>
+    <path d="M535 588v80m315-80v80" stroke="#48392e" stroke-width="18"/>
+  </g>
+  <rect x="160" y="500" width="145" height="25" rx="4" fill="#466f9a"/>
+  <rect x="170" y="475" width="145" height="25" rx="4" fill="#d5a83e"/>
+  <rect x="180" y="450" width="145" height="25" rx="4" fill="#a64e4e"/>
+  <g transform="translate(345 475)"><circle cx="0" cy="0" r="28" fill="#efefe9" stroke="#777" stroke-width="4"/><path d="M-28 0h56M0-28v56" stroke="#777" stroke-width="2"/><path d="M-13-22l26 44m0-44l-26 44" stroke="#777" stroke-width="2"/></g>
+  <path d="M620 500q25-70 50 0" fill="#4069a6" stroke="#294b79" stroke-width="7"/>
+  <rect x="575" y="500" width="140" height="70" rx="8" fill="#4069a6"/>
+  <path d="M610 525l55 28m-55 0l55-28" stroke="#eee" stroke-width="5"/>
+  <g transform="translate(770 470)"><circle cx="0" cy="0" r="38" fill="#d5b290"/><path d="M-38-4q6-50 76 0v-10q-8-40-38-40t-38 40z" fill="#3e2f2a"/><circle cx="-14" cy="0" r="9" fill="none" stroke="#343434" stroke-width="3"/><circle cx="14" cy="0" r="9" fill="none" stroke="#343434" stroke-width="3"/><path d="M-5 0h10" stroke="#343434" stroke-width="3"/><path d="M-9 20q9 7 18 0" fill="none" stroke="#8e554d" stroke-width="3"/></g>
+  <path d="M735 510q35-32 70 0l20 100H715z" fill="#7c4f87"/>
+  <rect x="920" y="500" width="205" height="100" rx="8" fill="#6b513d" filter="url(#shadow)"/>
+  <circle cx="970" cy="548" r="25" fill="#d7a642"/><path d="M955 548h30m-15-15v30" stroke="#fff" stroke-width="5"/>
+  <rect x="1020" y="522" width="70" height="52" rx="3" fill="#f0ede4"/>
+  <path d="M1030 536h50m-50 12h42m-42 12h48" stroke="#6283a2" stroke-width="3"/>
+  <rect x="30" y="405" width="190" height="42" rx="7" fill="#ece5d4" stroke="#6e5c48" stroke-width="5"/>
+  <text x="125" y="434" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#5b4636">ROOM 204</text>
+</svg>

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Spot the Difference AI Bridge",
+  "description": "Connects the local Spot the Difference creator to a logged-in ChatGPT tab for region planning and crop-by-crop image editing.",
+  "version": "0.2.5",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://*.oaiusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Spot the Difference AI Bridge",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/creator.html*",
+        "http://127.0.0.1/creator.html*",
+        "https://elitenewb.github.io/Spot-the-difference/creator.html*"
+      ],
+      "js": ["app-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["chatgpt-adapter.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ChatGPT Adapter Mock</title>
+  <style>
+    body{font:14px system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px}
+    #prompt-textarea{min-height:80px;border:1px solid #888;padding:8px}
+    button{padding:8px 12px;margin:6px}
+    pre{white-space:pre-wrap;background:#111;color:#d7f5dd;padding:12px;min-height:100px}
+    input[type=file]{width:1px;height:1px;opacity:0}
+  </style>
+</head>
+<body>
+  <h1>ChatGPT content-script adapter mock</h1>
+  <input data-testid="upload-photos-input" type="file" accept="image/*" multiple>
+  <button data-testid="composer-plus-btn" aria-label="Add files and more">Add files</button>
+  <div id="prompt-textarea" contenteditable="true" aria-label="Chat with ChatGPT"></div>
+  <button data-testid="send-button" aria-label="Send prompt" disabled>Send</button>
+  <main id="messages"></main>
+  <button id="runAnalysis">Run analysis adapter test</button>
+  <button id="runEdit">Run edit adapter test</button>
+  <pre id="log"></pre>
+
+  <script>
+    window.__adapterListener = null;
+    window.chrome = { runtime: { onMessage: { addListener(listener){ window.__adapterListener = listener; } } } };
+    const composer = document.getElementById('prompt-textarea');
+    const send = document.querySelector('[data-testid="send-button"]');
+    const log = document.getElementById('log');
+    const regions = Array.from({length:10},(_,index)=>({xNorm:.03+(index%5)*.19,yNorm:.12+Math.floor(index/5)*.52,wNorm:.07,hNorm:.09,instruction:`Remove detail ${index+1}.`}));
+    const editedSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#d2263a"/></svg>`;
+    const editedDataUrl = `data:image/svg+xml;base64,${btoa(editedSvg)}`;
+
+    composer.addEventListener('input',()=>{ send.disabled=!composer.textContent.trim(); });
+    send.addEventListener('click',()=>{
+      const message=document.createElement('div'); message.dataset.messageAuthorRole='assistant';
+      if(composer.textContent.includes('ANALYSIS_TEST')) message.textContent=JSON.stringify(regions);
+      else { const image=new Image(); image.src=editedDataUrl; message.appendChild(image); }
+      document.getElementById('messages').appendChild(message);
+    });
+
+    function invoke(type,payload){
+      return new Promise((resolve,reject)=>{
+        const returned=window.__adapterListener({type,payload},null,response=>response?.ok?resolve(response):reject(new Error(response?.error||'Unknown adapter error')));
+        if(returned!==true)reject(new Error('Adapter did not keep the response channel open'));
+      });
+    }
+    const tinyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nXQAAAAASUVORK5CYII=';
+    document.getElementById('runAnalysis').addEventListener('click',async()=>{
+      try{
+        const result=await invoke('SD_CHATGPT_ANALYZE',{imageDataUrl:tinyPng,prompt:'ANALYSIS_TEST'});
+        log.textContent=`PASS analysis: ${result.regions.length} regions\nUpload files: ${document.querySelector('[type=file]').files.length}`;
+      }catch(error){log.textContent=`FAIL analysis: ${error.message}`;}
+    });
+    document.getElementById('runEdit').addEventListener('click',async()=>{
+      try{
+        const result=await invoke('SD_CHATGPT_EDIT',{imageDataUrl:tinyPng,prompt:'EDIT_TEST'});
+        log.textContent+=`\nPASS edit: ${result.imageDataUrl?.startsWith('data:image/')?'image data returned':'missing image'}`;
+      }catch(error){log.textContent+=`\nFAIL edit: ${error.message}`;}
+    });
+  </script>
+  <script src="../../chrome-extension/chatgpt-adapter.js"></script>
+</body>
+</html>

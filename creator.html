@@ -5,343 +5,168 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Spot the Difference – Creator</title>
   <style>
-    :root { --bg:#0f1220; --panel:#171a2b; --ink:#e9ecf1; --muted:#a7b0c0; --accent:#7bd4ff; --good:#53d769; --bad:#ff5c5c; --frame:#2a2f4a; }
+    :root{--bg:#0f1220;--panel:#171a2b;--panel2:#111526;--ink:#e9ecf1;--muted:#a7b0c0;--accent:#7bd4ff;--good:#53d769;--bad:#ff7070;--warn:#ffc857;--frame:#2a2f4a}
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;background:linear-gradient(180deg,#0f1220,#0b0e1a);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    header{padding:16px 20px;border-bottom:1px solid #23263d;display:flex;align-items:center;gap:14px}
+    button,input,textarea{font:inherit}
+    header{height:58px;padding:14px 20px;border-bottom:1px solid #23263d;display:flex;align-items:center;justify-content:space-between;gap:14px}
     h1{margin:0;font-size:18px;letter-spacing:.3px}
-    main{display:grid;grid-template-columns:360px 1fr;min-height:calc(100% - 58px)}
-    aside{padding:16px;border-right:1px solid #23263d;background:var(--panel)}
+    header a{color:var(--muted);text-decoration:none}
+    header a:hover{color:var(--ink)}
+    main{display:grid;grid-template-columns:400px minmax(0,1fr);height:calc(100% - 58px);min-height:0}
+    aside{padding:16px;border-right:1px solid #23263d;background:var(--panel);overflow:auto}
     .section{margin-bottom:16px}
-    label{display:block;margin:10px 0 6px;color:var(--muted)}
-    input[type="file"], input[type="number"], button, textarea{width:100%;padding:10px;border:1px solid #2b3152;border-radius:10px;background:#0e1122;color:var(--ink)}
+    .section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+    .section-title strong{font-size:13px;letter-spacing:.2px}
+    label{display:block;margin:9px 0 6px;color:var(--muted)}
+    input[type="file"],input[type="number"],input[type="text"],button,textarea{width:100%;padding:10px;border:1px solid #2b3152;border-radius:10px;background:#0e1122;color:var(--ink)}
     input[type="number"]{appearance:textfield}
+    textarea{min-height:70px;resize:vertical}
     button{cursor:pointer;background:#10142b}
-    button.primary{background:var(--accent);border-color:#66c9fb;color:#001019;font-weight:600}
-    button:disabled{opacity:.45;cursor:not-allowed}
-    .row{display:flex;gap:10px}
-    .row > *{flex:1}
+    button:hover:not(:disabled){border-color:#50618f}
+    button.primary{background:var(--accent);border-color:#66c9fb;color:#001019;font-weight:700}
+    button.good{background:#15311f;border-color:#2c7544;color:#d9ffe4}
+    button.danger{color:#ffd7d7;border-color:#683636}
+    button:disabled{opacity:.42;cursor:not-allowed}
+    button:focus-visible,input:focus-visible,textarea:focus-visible,header a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+    .row{display:flex;gap:8px}
+    .row>*{flex:1;min-width:0}
+    .mode-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px}
+    .mode-tabs button[aria-selected="true"]{background:#243352;border-color:var(--accent);color:#fff}
+    .mode-panel[hidden]{display:none}
     .hint{color:var(--muted);font-size:12px;margin-top:6px}
-    .canvas-wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
-    .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
-    .frame{position:relative;background:#0a0d1b;border:3px solid var(--frame);border-radius:12px;overflow:hidden}
-    canvas{width:100%;height:100%;display:block;cursor:crosshair}
+    .notice{padding:10px;border:1px solid #343b5d;border-radius:10px;background:#101426;color:var(--muted);font-size:12px}
+    .notice.warn{border-color:#6d5828;color:#ffe7a7;background:#211b0d}
+    .status{display:flex;align-items:center;gap:7px;min-height:22px;color:var(--muted);font-size:12px}
+    .status-dot{width:8px;height:8px;border-radius:50%;background:#70788e;flex:none}
+    .status.connected .status-dot{background:var(--good);box-shadow:0 0 0 3px #53d76922}
+    .status.busy .status-dot{background:var(--warn);animation:pulse 1s infinite}
+    .status.error .status-dot{background:var(--bad)}
+    @keyframes pulse{50%{opacity:.35}}
+    .canvas-wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px;align-content:start;min-width:0;overflow:auto}
+    .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px;min-width:0}
+    .frame{position:relative;background:#0a0d1b;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3}
+    canvas{width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
     .badge{display:inline-block;background:#0008;color:#fff;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #ffffff22;margin-bottom:8px}
-    .toolbar{display:flex;gap:8px;margin-top:10px}
-    .list{max-height:180px;overflow:auto;border:1px dashed #2b3152;border-radius:10px;padding:10px}
-    code.k{background:#0c1022;color:#dfe7ff;padding:2px 6px;border-radius:6px}
+    .region-list{display:grid;gap:8px;max-height:330px;overflow:auto;padding-right:2px}
+    .region-empty{padding:14px;border:1px dashed #343b5d;border-radius:10px;color:var(--muted);text-align:center;font-size:12px}
+    .region-item{border:1px solid #2b3152;border-radius:10px;background:var(--panel2);padding:9px}
+    .region-head{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+    .region-index{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:#243352;color:#dff5ff;font-weight:700;flex:none}
+    .region-label{min-width:0;flex:1;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .region-state{font-size:11px;color:var(--muted)}
+    .region-state.done{color:var(--good)}
+    .region-state.error{color:var(--bad)}
+    .region-actions{display:flex;gap:6px;margin-top:7px}
+    .region-actions button{padding:6px 8px;font-size:11px}
+    .region-item textarea{min-height:58px;padding:8px;font-size:12px}
+    .progress{height:7px;background:#0d1020;border:1px solid #2b3152;border-radius:999px;overflow:hidden;margin-top:8px}
+    .progress>div{height:100%;width:0;background:linear-gradient(90deg,#5bbde9,#7bd4ff);transition:width .2s ease}
+    .hidden-input{display:none}
+    @media(max-width:1000px){main{grid-template-columns:350px minmax(0,1fr)}.canvas-wrap{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <header>
     <h1>Spot the Difference – <span style="color:var(--accent)">Creator</span></h1>
+    <a href="index.html">Home</a>
   </header>
   <main>
     <aside>
-      <div class="section">
-        <label>Modified Image (left)</label>
-        <input id="modFile" type="file" accept="image/*" />
-        <label>Original Image (right)</label>
-        <input id="origFile" type="file" accept="image/*" />
-        <div class="hint">Both images should be the same dimensions.</div>
+      <div class="mode-tabs" role="tablist" aria-label="Puzzle creation mode">
+        <button id="manualTab" role="tab" aria-selected="true" aria-controls="manualPanel">Manual upload</button>
+        <button id="aiTab" role="tab" aria-selected="false" aria-controls="aiPanel">AI with ChatGPT</button>
       </div>
+
+      <section id="manualPanel" class="mode-panel" role="tabpanel" aria-labelledby="manualTab">
+        <div class="section">
+          <label for="modFile">Modified image</label>
+          <input id="modFile" type="file" accept="image/*" />
+          <label for="origFile">Original image</label>
+          <input id="origFile" type="file" accept="image/*" />
+          <div class="hint">Preserves the existing workflow. Both images must have identical pixel dimensions.</div>
+        </div>
+      </section>
+
+      <section id="aiPanel" class="mode-panel" role="tabpanel" aria-labelledby="aiTab" hidden>
+        <div class="section">
+          <label for="aiOrigFile">Original image</label>
+          <input id="aiOrigFile" type="file" accept="image/*" />
+          <div class="hint">The full image is sent only for region analysis. Editing jobs receive padded crops one at a time.</div>
+        </div>
+        <div class="section notice">
+          Requires the unpacked <strong>Spot the Difference AI Bridge</strong> Chrome extension and a logged-in ChatGPT tab. No API key is stored or used.
+        </div>
+        <div class="section">
+          <div id="extensionStatus" class="status" role="status" aria-live="polite"><span class="status-dot"></span><span>Checking for extension…</span></div>
+          <div class="row" style="margin-top:8px">
+            <button id="checkExtensionBtn">Check bridge</button>
+            <button id="analyzeBtn" class="primary" disabled>Suggest regions</button>
+          </div>
+        </div>
+        <div class="section">
+          <button id="generateBtn" class="good" disabled>Generate pending edits</button>
+          <button id="cancelAiBtn" class="danger" style="margin-top:8px" disabled>Cancel current job</button>
+          <div class="progress" aria-hidden="true"><div id="aiProgress"></div></div>
+          <div id="aiRunStatus" class="hint" role="status" aria-live="polite">Review every proposed rectangle and instruction before generating.</div>
+        </div>
+      </section>
 
       <div class="section row">
         <div>
-          <label>Regions Needed</label>
+          <label for="need">Differences needed</label>
           <input id="need" type="number" min="1" max="30" value="10" />
         </div>
         <div>
-          <label>Tools</label>
-          <div class="toolbar">
-            <button id="clearPoints">Clear</button>
+          <label>Rectangle tools</label>
+          <div class="row">
             <button id="undoPoint">Undo</button>
+            <button id="clearPoints" class="danger">Clear</button>
           </div>
         </div>
       </div>
 
       <div class="section">
-        <label>Export / Import Config</label>
-        <div class="toolbar">
-          <button id="exportBtn" class="primary" disabled>Export JSON</button>
-          <button id="importBtn">Import JSON</button>
-          <input id="importFile" type="file" accept="application/json" style="display:none" />
-        </div>
-        <div class="list" id="pointList"></div>
+        <div class="section-title"><strong>Difference regions</strong><span id="regionCount" class="hint">0 / 10</span></div>
+        <div id="regionList" class="region-list" aria-live="polite"></div>
       </div>
+
       <div class="section">
-        <div class="hint">Click &amp; drag on the modified image to mark difference regions. Export includes normalized rectangle positions and natural size. Player uses the same math for hit &amp; reveal.</div>
+        <div class="section-title"><strong>Export puzzle</strong></div>
+        <div class="row">
+          <button id="downloadImageBtn" disabled>Modified PNG</button>
+          <button id="exportBtn" class="primary" disabled>Config JSON</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="downloadBothBtn" disabled>Download both files</button>
+          <button id="importBtn">Import config</button>
+          <input id="importFile" class="hidden-input" type="file" accept="application/json" />
+        </div>
+        <div class="hint">The player still uses the modified image, original image, and config JSON.</div>
       </div>
+
+      <details id="creatorDiagnostics" class="section" hidden>
+        <summary style="cursor:pointer;color:var(--muted)">Creator diagnostics</summary>
+        <button id="runCreatorDiagnostics" style="margin-top:8px">Run synthetic workflow tests</button>
+        <button id="loadClassroomFixture" style="margin-top:8px">Load classroom bridge fixture</button>
+        <pre id="creatorTestLog" style="white-space:pre-wrap;max-height:220px;overflow:auto;padding:8px;border:1px solid #2b3152;border-radius:8px;background:#0e1122;color:#cfe3ff"></pre>
+      </details>
     </aside>
 
     <div class="canvas-wrap">
       <div class="card">
-        <span class="badge">Modified (click &amp; drag to mark)</span>
-        <div class="frame" id="modFrame">
-          <canvas id="modCanvas"></canvas>
-        </div>
+        <span id="modBadge" class="badge">Modified — drag to mark a region</span>
+        <div class="frame" id="modFrame"><canvas id="modCanvas"></canvas></div>
       </div>
       <div class="card">
-        <span class="badge">Original (preview)</span>
-        <div class="frame" id="origFrame">
-          <canvas id="origCanvas"></canvas>
-        </div>
+        <span class="badge">Original reference</span>
+        <div class="frame" id="origFrame"><canvas id="origCanvas"></canvas></div>
       </div>
     </div>
   </main>
 
-  <script>
-    const modFile = document.getElementById('modFile');
-    const origFile = document.getElementById('origFile');
-    const modCanvas = document.getElementById('modCanvas');
-    const origCanvas = document.getElementById('origCanvas');
-    const modFrame = document.getElementById('modFrame');
-    const origFrame = document.getElementById('origFrame');
-    const needInput = document.getElementById('need');
-    const list = document.getElementById('pointList');
-    const exportBtn = document.getElementById('exportBtn');
-    const importBtn = document.getElementById('importBtn');
-    const importFile = document.getElementById('importFile');
-    const clearBtn = document.getElementById('clearPoints');
-    const undoBtn = document.getElementById('undoPoint');
-
-    let modImg = new Image();
-    let origImg = new Image();
-    let naturalW = 0, naturalH = 0;
-    let regions = []; // {xNorm, yNorm, wNorm, hNorm}
-
-    let dragging = false;
-    let dragStart = null; // {xNorm, yNorm}
-    let dragCurrent = null; // {xNorm, yNorm}
-    const MIN_DRAG_PX = 5;
-
-    function dpr(){ return Math.max(1, window.devicePixelRatio || 1); }
-
-    function setFrameAspect(){
-      if (naturalW > 0 && naturalH > 0){
-        const ar = `${naturalW}/${naturalH}`;
-        modFrame.style.aspectRatio = ar;
-        origFrame.style.aspectRatio = ar;
-      } else {
-        modFrame.style.aspectRatio = '4 / 3';
-        origFrame.style.aspectRatio = '4 / 3';
-      }
-    }
-
-    function fitCanvasSize() {
-      setFrameAspect();
-      const ratio = naturalW && naturalH ? naturalW / naturalH : 4/3;
-      const wrapW = modCanvas.parentElement.clientWidth;
-      const cssW = wrapW;
-      const cssH = wrapW / ratio;
-      for (const c of [modCanvas, origCanvas]){
-        c.style.width = cssW + 'px';
-        c.style.height = cssH + 'px';
-        c.width  = Math.round(cssW * dpr());
-        c.height = Math.round(cssH * dpr());
-        const ctx = c.getContext('2d');
-        ctx.setTransform(dpr(),0,0,dpr(),0,0);
-      }
-      draw();
-    }
-
-    function draw(){
-      const mctx = modCanvas.getContext('2d');
-      const octx = origCanvas.getContext('2d');
-      const cssW = modCanvas.clientWidth, cssH = modCanvas.clientHeight;
-      mctx.clearRect(0,0,cssW,cssH); octx.clearRect(0,0,cssW,cssH);
-      if (modImg.complete && naturalW) mctx.drawImage(modImg,0,0,cssW,cssH);
-      if (origImg.complete && naturalW) octx.drawImage(origImg,0,0,cssW,cssH);
-
-      for (const r of regions){ drawGuide(modCanvas, r); drawGuide(origCanvas, r); }
-
-      if (dragging && dragStart && dragCurrent){
-        const temp = normToRect(dragStart, dragCurrent);
-        drawDragPreview(modCanvas, temp);
-        drawDragPreview(origCanvas, temp);
-      }
-
-      updateList();
-      exportBtn.disabled = !(regions.length === +needInput.value && naturalW);
-    }
-
-    function normToRect(a, b){
-      const x = Math.min(a.xNorm, b.xNorm);
-      const y = Math.min(a.yNorm, b.yNorm);
-      const w = Math.abs(a.xNorm - b.xNorm);
-      const h = Math.abs(a.yNorm - b.yNorm);
-      return {xNorm:x, yNorm:y, wNorm:w, hNorm:h};
-    }
-
-    function drawGuide(canvas, r){
-      const ctx = canvas.getContext('2d');
-      const x = r.xNorm * canvas.clientWidth;
-      const y = r.yNorm * canvas.clientHeight;
-      const w = r.wNorm * canvas.clientWidth;
-      const h = r.hNorm * canvas.clientHeight;
-      ctx.save();
-      ctx.strokeStyle = '#7bd4ffcc';
-      ctx.setLineDash([8,6]);
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, y, w, h);
-      ctx.restore();
-    }
-
-    function drawDragPreview(canvas, r){
-      const ctx = canvas.getContext('2d');
-      const x = r.xNorm * canvas.clientWidth;
-      const y = r.yNorm * canvas.clientHeight;
-      const w = r.wNorm * canvas.clientWidth;
-      const h = r.hNorm * canvas.clientHeight;
-      ctx.save();
-      ctx.fillStyle = 'rgba(123,212,255,0.12)';
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = '#7bd4ff';
-      ctx.setLineDash([6,4]);
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
-      ctx.restore();
-    }
-
-    function canvasToNorm(ev, canvas){
-      const rect = canvas.getBoundingClientRect();
-      const x = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      const y = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
-      return {xNorm:x, yNorm:y};
-    }
-
-    function dragDistPx(a, b){
-      const dx = (a.xNorm - b.xNorm) * modCanvas.clientWidth;
-      const dy = (a.yNorm - b.yNorm) * modCanvas.clientHeight;
-      return Math.hypot(dx, dy);
-    }
-
-    modCanvas.addEventListener('mousedown', (ev)=>{
-      if (!naturalW || regions.length >= +needInput.value) return;
-      ev.preventDefault();
-      dragging = true;
-      dragStart = canvasToNorm(ev, modCanvas);
-      dragCurrent = dragStart;
-    });
-
-    modCanvas.addEventListener('mousemove', (ev)=>{
-      if (!dragging) return;
-      dragCurrent = canvasToNorm(ev, modCanvas);
-      draw();
-    });
-
-    window.addEventListener('mouseup', (ev)=>{
-      if (!dragging) return;
-      dragging = false;
-      const end = canvasToNorm(ev, modCanvas);
-      if (dragDistPx(dragStart, end) < MIN_DRAG_PX){
-        dragStart = null; dragCurrent = null; draw(); return;
-      }
-      const rect = normToRect(dragStart, end);
-      regions.push(rect);
-      dragStart = null; dragCurrent = null;
-      draw();
-    });
-
-    modCanvas.addEventListener('touchstart', (ev)=>{
-      if (!naturalW || regions.length >= +needInput.value) return;
-      ev.preventDefault();
-      const t = ev.touches[0];
-      dragging = true;
-      dragStart = canvasToNorm(t, modCanvas);
-      dragCurrent = dragStart;
-    }, {passive:false});
-
-    modCanvas.addEventListener('touchmove', (ev)=>{
-      if (!dragging) return;
-      ev.preventDefault();
-      const t = ev.touches[0];
-      dragCurrent = canvasToNorm(t, modCanvas);
-      draw();
-    }, {passive:false});
-
-    window.addEventListener('touchend', (ev)=>{
-      if (!dragging) return;
-      dragging = false;
-      const end = dragCurrent || dragStart;
-      if (dragDistPx(dragStart, end) < MIN_DRAG_PX){
-        dragStart = null; dragCurrent = null; draw(); return;
-      }
-      const rect = normToRect(dragStart, end);
-      regions.push(rect);
-      dragStart = null; dragCurrent = null;
-      draw();
-    });
-
-    clearBtn.onclick = ()=>{ regions = []; draw(); };
-    undoBtn.onclick = ()=>{ regions.pop(); draw(); };
-
-    function readImage(file, imgEl, onload){
-      const reader = new FileReader(); reader.onload = ()=>{ imgEl.src = reader.result; }; reader.readAsDataURL(file);
-      imgEl.onload = ()=>{
-        if (!naturalW){ naturalW = imgEl.naturalWidth; naturalH = imgEl.naturalHeight; fitCanvasSize(); }
-        if (onload) onload(); draw();
-      };
-    }
-
-    modFile.onchange = (e)=>{ if (e.target.files[0]) readImage(e.target.files[0], modImg, ()=>{}); };
-    origFile.onchange = (e)=>{ if (e.target.files[0]) readImage(e.target.files[0], origImg, ()=>{}); };
-    window.addEventListener('resize', fitCanvasSize);
-    window.addEventListener('DOMContentLoaded', fitCanvasSize);
-    needInput.addEventListener('input', draw);
-
-    function updateList(){
-      list.innerHTML = regions.map((r,i)=>
-        `#${i+1}: x=${(r.xNorm*100).toFixed(1)}% y=${(r.yNorm*100).toFixed(1)}% w=${(r.wNorm*100).toFixed(1)}% h=${(r.hNorm*100).toFixed(1)}%`
-      ).join('<br/>');
-    }
-
-    exportBtn.onclick = ()=>{
-      const cfg = { version:3, natural:{w:naturalW,h:naturalH}, regions, need:+needInput.value };
-      const blob = new Blob([JSON.stringify(cfg,null,2)], {type:'application/json'});
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'spot-config.json'; document.body.appendChild(a); a.click(); a.remove();
-    };
-
-    function migrateV2toV3(cfg){
-      let rNorm = cfg.radiusNorm;
-      if (rNorm == null && cfg.radius != null && cfg.natural && cfg.natural.w && cfg.natural.h){
-        rNorm = cfg.radius / Math.min(cfg.natural.w, cfg.natural.h);
-      }
-      if (!rNorm) rNorm = 0.02;
-      const nw = (cfg.natural && cfg.natural.w) ? cfg.natural.w : 1;
-      const nh = (cfg.natural && cfg.natural.h) ? cfg.natural.h : 1;
-      const minSide = Math.min(nw, nh);
-      const sidePxW = rNorm * minSide * 2;
-      const sidePxH = rNorm * minSide * 2;
-      const wNorm = sidePxW / nw;
-      const hNorm = sidePxH / nh;
-      return (cfg.points || []).map(p => ({
-        xNorm: p.xNorm - wNorm/2,
-        yNorm: p.yNorm - hNorm/2,
-        wNorm,
-        hNorm
-      }));
-    }
-
-    importBtn.onclick = ()=> importFile.click();
-    importFile.onchange = (e)=>{
-      const f = e.target.files[0]; if (!f) return; const r = new FileReader();
-      r.onload = ()=>{ try{
-        const cfg = JSON.parse(r.result);
-        if (cfg.version >= 3 && cfg.regions){
-          regions = cfg.regions;
-        } else if (cfg.points) {
-          regions = migrateV2toV3(cfg);
-        } else {
-          throw new Error('Invalid config: no regions or points found');
-        }
-        needInput.value = cfg.need || regions.length;
-        if (cfg.natural && cfg.natural.w){ naturalW = cfg.natural.w; naturalH = cfg.natural.h; }
-        fitCanvasSize(); draw();
-      }catch(err){ alert('Could not import JSON: '+err.message); } };
-      r.readAsText(f);
-    };
-  </script>
+  <input id="patchUpload" class="hidden-input" type="file" accept="image/*" />
+  <script src="creator.js"></script>
 </body>
 </html>

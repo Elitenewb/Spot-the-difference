@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Spot the Difference – Player</title>
   <style>
-    :root{--bg:#0f1220;--panel:#171a0b;--ink:#e9ecf1;--muted:#a7b0c0;--accent:#7bd4ff;--frame:#2a2f4a;--good:#53d769;--bad:#ff5c5c}
+    :root{--bg:#0f1220;--panel:#171a2b;--ink:#e9ecf1;--muted:#a7b0c0;--accent:#7bd4ff;--frame:#2a2f4a;--good:#53d769;--bad:#ff5c5c}
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;background:linear-gradient(180deg,#0f1220,#0b0e1a);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
     header{padding:16px 20px;border-bottom:1px solid #23263d;display:flex;align-items:center;justify-content:space-between}
     h1{margin:0;font-size:18px}
+    header a{color:var(--muted);text-decoration:none}
+    header a:hover{color:var(--ink)}
     main{display:grid;grid-template-columns:320px 1fr;min-height:calc(100% - 58px)}
     body.playing main{grid-template-columns:1fr}
     aside{padding:16px;border-right:1px solid #23263d;background:var(--panel)}
@@ -19,8 +21,10 @@
     label{display:block;margin:8px 0 6px;color:var(--muted)}
     input[type="file"],button{width:100%;padding:10px;border:1px solid #2b3152;border-radius:10px;background:#0e1122;color:var(--ink)}
     button{cursor:pointer}
+    button:focus-visible,input:focus-visible,header a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
     button.primary{background:var(--accent);border-color:#66c9fb;color:#001019;font-weight:600}
     .row{display:flex;gap:10px}
+    .row > *{min-width:0}
 
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px}
     .game{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px}
@@ -64,24 +68,51 @@
     }
     #readyStartBtn{font-size:36px;padding:22px 32px;border-radius:16px}
 
-    .hud{display:none;gap:12px;align-items:center;justify-content:center;padding:10px 18px;border-top:1px solid #23263d}
+    .hud{display:none;gap:14px;align-items:center;justify-content:center;padding:10px 18px;border-top:1px solid #23263d;background:#0b0e1a}
     body.playing .hud{display:flex}
     .hud .timer{font-variant-numeric:tabular-nums;background:#0e1327;border:1px solid #2b3152;border-radius:10px;padding:8px 12px;color:var(--muted)}
-
-    .under-left{display:none;justify-content:center;padding:10px}
-    body.playing .under-left{display:flex}
     .btn{padding:10px 14px;border-radius:10px;border:1px solid #2b3152;background:#0e1122;color:var(--ink);cursor:pointer}
+
+    /* Full-screen classroom mode */
+    body.playing{height:100%;overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+    body.playing header{justify-content:center;padding:10px 18px}
+    body.playing header h1,body.playing header>a{display:none}
+    body.playing .stats{justify-content:center;flex-wrap:nowrap}
+    body.playing .chip{font-size:clamp(16px,1.15vw,24px);padding:8px 14px}
+    body.playing main{min-height:0}
+    body.playing .game{height:100%;min-height:0;align-items:center;overflow:hidden}
+    body.playing .card{min-width:0;min-height:0;padding:clamp(8px,0.8vw,14px)}
+    body.playing .hud{min-height:70px}
+    body.playing .hud .btn,body.playing .hud .timer{min-height:52px;padding:10px 22px;font-size:clamp(18px,1.2vw,24px)}
 
     /* Diagnostics panel */
     details.debug{margin-top:12px}
     details.debug summary{cursor:pointer;color:var(--muted)}
     body.modal-open{overflow:hidden}
     pre.testlog{white-space:pre-wrap;background:#0e1327;border:1px solid #2b3152;border-radius:8px;padding:8px;color:#cfe3ff;max-height:160px;overflow:auto}
+    @media (max-width: 900px){
+      header{flex-wrap:wrap;gap:10px}
+      header .stats{flex:0 0 100%}
+      main{display:block}
+      aside{border-right:0;border-bottom:1px solid #23263d}
+      .game{grid-template-columns:1fr;padding:12px}
+      .stats{width:100%}
+    }
+    @media (max-width: 520px){
+      header{padding:12px}
+      header h1{font-size:16px;line-height:1.25}
+      header a{margin-left:auto}
+      .chip{padding:5px 8px;font-size:12px}
+      .row{flex-direction:column}
+      #readyStartBtn{font-size:28px}
+      input[type="file"]{font-size:16px;overflow:hidden}
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>Spot the Difference</h1>
+    <a href="index.html">Home</a>
     <div class="stats">
       <div class="chip" id="lastGain" style="display:none">+0</div>
       <div class="chip">Total: <span id="score" class="num">0</span></div>
@@ -92,11 +123,11 @@
   <main>
     <aside>
       <div class="section">
-        <label>Load Modified (left)</label>
+        <label for="modFile">Load Modified (left)</label>
         <input id="modFile" type="file" accept="image/*" />
-        <label>Load Original (right)</label>
+        <label for="origFile">Load Original (right)</label>
         <input id="origFile" type="file" accept="image/*" />
-        <label>Load Config (JSON)</label>
+        <label for="cfgFile">Load Config (JSON)</label>
         <input id="cfgFile" type="file" accept="application/json" />
       </div>
       <div class="section row">
@@ -127,7 +158,6 @@
             <canvas id="modCanvas" class="layer"></canvas>
           </div>
         </div>
-        <div class="under-left"><button id="hintBtnUnder" class="btn" type="button">Hint</button></div>
       </div>
       <div class="card">
         <div class="frame" id="rightFrame">
@@ -138,7 +168,12 @@
     </div>
   </main>
 
-  <div class="hud" id="hud"><div id="upTimer" class="timer">00:00</div></div>
+  <div class="hud" id="hud">
+    <button id="hintBtnUnder" class="btn" type="button">Hint</button>
+    <div id="upTimer" class="timer" aria-label="Elapsed time">00:00</div>
+    <button id="fullscreenBtn" class="btn" type="button">Full screen</button>
+    <button id="exitGameBtn" class="btn" type="button">Exit game</button>
+  </div>
 
   <div id="doneModal" class="modal">
     <div class="inner">
@@ -146,7 +181,7 @@
       <p>Total Time: <span id="sumTime">—</span></p>
       <p>Total Score: <span id="sumScore">—</span></p>
       <div class="row">
-        <button id="closeModal" class="primary">Close</button>
+        <button id="closeModal" class="primary">Back to setup</button>
         <button id="playAgain">Play again</button>
       </div>
     </div>
@@ -166,6 +201,8 @@
     const cfgFile = document.getElementById('cfgFile');
     const startBtn = document.getElementById('startBtn');
     const hintBtnUnder = document.getElementById('hintBtnUnder');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const exitGameBtn = document.getElementById('exitGameBtn');
     const resetBtn = document.getElementById('resetBtn');
     const runDiagBtn = document.getElementById('runDiag');
     const runUnitTestsBtn = document.getElementById('runUnitTests');
@@ -202,6 +239,7 @@
     let cfg = null; // {regions[{xNorm,yNorm,wNorm,hNorm}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
+    let gameActive = false;
 
     let upStart = 0;
     let upTimerId = null;
@@ -244,9 +282,12 @@
     }
 
     function parseConfig(raw){
-      if (raw.version >= 3 && raw.regions) return raw;
-      if (raw.points) return migrateV2toV3(raw);
-      throw new Error('Invalid config');
+      const parsed = raw.version >= 3 && Array.isArray(raw.regions) ? raw : raw.points ? migrateV2toV3(raw) : null;
+      if (!parsed) throw new Error('Config must contain regions');
+      const valid = parsed.regions.length > 0 && parsed.regions.every(region => ['xNorm','yNorm','wNorm','hNorm'].every(key => Number.isFinite(region[key])) && region.wNorm > 0 && region.hNorm > 0 && region.xNorm >= 0 && region.yNorm >= 0 && region.xNorm + region.wNorm <= 1 && region.yNorm + region.hNorm <= 1);
+      if (!valid) throw new Error('Config contains invalid or out-of-bounds regions');
+      parsed.need = Math.min(parsed.regions.length, Math.max(1, Number(parsed.need) || parsed.regions.length));
+      return parsed;
     }
 
     // -----------------------------
@@ -416,7 +457,7 @@
     }
 
     function onPlayClick(ev){
-      if (!cfg || !imagesReady()) return;
+      if (!gameActive || !cfg || !imagesReady()) return;
       const r = cssRectLeft();
       const x = ev.clientX - r.left;
       const y = ev.clientY - r.top;
@@ -479,7 +520,7 @@
     function resetBonus(){ bonusStart = performance.now(); }
 
     function doHint(){
-      if (!cfg) return;
+      if (!gameActive || !cfg) return;
       const unresolved = cfg.regions.map((_,i)=> i).filter(i=> !found.has(i));
       if (!unresolved.length) return;
       const r = cssRectLeft();
@@ -498,11 +539,24 @@
     }
 
     // Loaders
-    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp} = await loadBitmap(f); modBmp=bmp; setAspect(); sizeCanvases(); drawBaseLayers(); };
-    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(!f) return; const {bmp} = await loadBitmap(f); origBmp=bmp; setAspect(); sizeCanvases(); drawBaseLayers(); };
+    async function handleImageFile(file, side){
+      const {bmp} = await loadBitmap(file);
+      const other = side === 'modified' ? origBmp : modBmp;
+      if (other && (other.width !== bmp.width || other.height !== bmp.height)){
+        alert(`Image dimensions must match. Expected ${other.width}×${other.height}, received ${bmp.width}×${bmp.height}.`);
+        (side === 'modified' ? modFile : origFile).value = '';
+        if (bmp.close) bmp.close();
+        return;
+      }
+      if (side === 'modified') modBmp=bmp; else origBmp=bmp;
+      setAspect(); sizeCanvases(); drawBaseLayers();
+    }
+    modFile.onchange = async (e)=>{ const f=e.target.files[0]; if(f) await handleImageFile(f, 'modified'); };
+    origFile.onchange = async (e)=>{ const f=e.target.files[0]; if(f) await handleImageFile(f, 'original'); };
     cfgFile.onchange = (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ cfg=parseConfig(JSON.parse(r.result)); resetState(); }catch(err){ alert('Invalid config JSON: '+err.message); } }; r.readAsText(f); };
 
     function resetState(){
+      gameActive = false;
       score = 0; scoreEl.textContent = score; lastGainEl.style.display='none';
       found = new Set(); foundEl.textContent = 0; needEl.textContent = cfg?.need || (cfg?.regions? cfg.regions.length : 10);
       setAspect(); sizeCanvases(); drawBaseLayers();
@@ -523,12 +577,32 @@
       readyModal.style.display='none';
       document.body.classList.remove('modal-open');
       resetBonus();
+      gameActive = true;
       startTimers();
     };
 
     modCanvas.addEventListener('click', onPlayClick);
     hintBtnUnder.onclick = doHint;
-    resetBtn.onclick = ()=>{ if(!cfg) return; resetState(); startTimers(); };
+    fullscreenBtn.onclick = async ()=>{
+      try{
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await document.documentElement.requestFullscreen();
+      }catch(err){ alert('Full-screen mode is not available in this browser.'); }
+    };
+    document.addEventListener('fullscreenchange', ()=>{
+      fullscreenBtn.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+      requestAnimationFrame(()=>{ if(cfg){ sizeCanvases(); drawBaseLayers(); replayHoles(); } });
+    });
+    async function returnToSetup(){
+      gameActive = false;
+      if (upTimerId) cancelAnimationFrame(upTimerId);
+      if (document.fullscreenElement){ try{ await document.exitFullscreen(); }catch(_){} }
+      document.body.classList.remove('playing','modal-open');
+      readyModal.style.display='none'; doneModal.style.display='none';
+      if(cfg) resetState();
+    }
+    resetBtn.onclick = returnToSetup;
+    exitGameBtn.onclick = returnToSetup;
     let resizeRAF=null;
     window.addEventListener('resize', ()=>{
       if(!cfg) return;
@@ -537,6 +611,7 @@
     });
 
     function finish(){
+      gameActive = false;
       cancelAnimationFrame(upTimerId);
       document.getElementById('sumScore').textContent = score;
       document.getElementById('sumTime').textContent = upTimerEl.textContent;
@@ -544,8 +619,8 @@
       document.body.classList.add('modal-open');
       sfx.complete();
     }
-    closeModal.onclick = ()=>{ doneModal.style.display='none'; document.body.classList.remove('modal-open'); };
-    playAgain.onclick = ()=>{ doneModal.style.display='none'; document.body.classList.remove('modal-open'); resetState(); startTimers(); };
+    closeModal.onclick = returnToSetup;
+    playAgain.onclick = ()=>{ doneModal.style.display='none'; document.body.classList.remove('modal-open'); resetState(); gameActive=true; startTimers(); };
 
     // -----------------------------
     // Diagnostics / test harness
