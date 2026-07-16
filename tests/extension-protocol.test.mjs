@@ -102,6 +102,8 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(adapter.includes('SD_CHATGPT_PROGRESS'));
   assert.ok(adapter.includes("input.files?.length !== 1"));
   assert.ok(adapter.includes('attachmentPreview'));
+  assert.ok(adapter.includes('composerAttachmentReady(name)'));
+  assert.ok(adapter.includes('attempt <= 3'));
   assert.ok(adapter.includes("ChatGPT did not show the analysis image as an attachment"));
   assert.ok(adapter.indexOf('await uploadImage(payload.imageDataUrl') < adapter.indexOf('await submitPrompt(payload.prompt'), 'an analysis prompt must be submitted only after its image upload completes');
   assert.ok(!adapter.includes("assistant: ['[data-message-author-role=\"assistant\"]', 'article"));
@@ -164,8 +166,13 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center'));
   assert.ok(creator.includes('visually verify that every rectangle actually covers'));
   assert.ok(creator.includes('exact pixel-change mask, not as a pointer identifying the student'));
-  assert.ok(creator.includes('targetCheck must be a specific sentence'));
+  assert.ok(creator.includes('targetCheck must specifically name the visible pixels'));
+  assert.ok(creator.includes('state.analysisVerificationPasses<2'));
+  assert.ok(creator.includes('state.regionsVerified=true'));
+  assert.ok(creator.includes("if(state.mode==='manual'||state.regionsVerified)drawGuide"));
+  assert.ok(creator.includes('grid is spaced every 0.05'));
   assert.ok(creator.includes('requireTargetCheck&&targetCheck.length<24'));
+  assert.ok(creator.includes('visual verification did not describe all four rectangle edges'));
   assert.ok(creator.includes('hat or cap region was not verified against the top of the head'));
   assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, or reframe"));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));

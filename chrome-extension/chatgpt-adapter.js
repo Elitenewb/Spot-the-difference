@@ -22,6 +22,7 @@
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const firstMatch = selectors => selectors.map(selector => document.querySelector(selector)).find(Boolean) || null;
   const allMatches = selectors => [...new Set(selectors.flatMap(selector => [...document.querySelectorAll(selector)]))];
+  const isVisible = element => !!element && element.getClientRects().length > 0;
 
   function reportProgress(payload, stage, message) {
     if (!payload?.jobId) return;
@@ -59,10 +60,28 @@
     return input;
   }
 
-  async function uploadImage(dataUrl, name, payload) {
-    const input = await findFileInput();
+  function composerAttachmentReady(name) {
+    const composer = firstMatch(SELECTORS.composer);
+    const root = composer?.closest('form') || composer?.parentElement?.parentElement || document.body;
+    const namedAttachment = [...root.querySelectorAll('img, [role="button"], button, span, div')]
+      .some(element => isVisible(element) && (
+        element.getAttribute('alt')?.includes(name) ||
+        element.getAttribute('aria-label')?.includes(name) ||
+        element.textContent?.includes(name)
+      ));
+    const visiblePreview = SELECTORS.attachmentPreview
+      .flatMap(selector => [...root.querySelectorAll(selector)])
+      .some(element => isVisible(element));
+    const composerImage = [...root.querySelectorAll('img')]
+      .some(image => isVisible(image) && image.getBoundingClientRect().width >= 32 && image.getBoundingClientRect().height >= 32);
+    // uploadImage runs before prompt text is inserted. At that point an enabled
+    // Send button is evidence that an attachment, rather than text, is ready.
+    const send = firstMatch(SELECTORS.send);
+    return namedAttachment || visiblePreview || composerImage || !!(send && !send.disabled);
+  }
+
+  async function stageImage(input, file) {
     const transfer = new DataTransfer();
-    const file = dataUrlToFile(dataUrl, name);
     transfer.items.add(file);
     input.files = transfer.files;
     if (input.files?.length !== 1 || input.files[0]?.name !== file.name) {
@@ -70,16 +89,29 @@
     }
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  async function uploadImage(dataUrl, name, payload) {
+    const file = dataUrlToFile(dataUrl, name);
     reportProgress(payload, 'attached', 'Waiting for ChatGPT to finish attaching the image…');
-    await waitFor(() => {
-      const visiblePreview = allMatches(SELECTORS.attachmentPreview).some(element => element.offsetParent !== null);
-      const namedAttachment = [...document.querySelectorAll('img, [role="button"], button, span, div')]
-        .some(element => element.offsetParent !== null && element.textContent?.includes(name));
-      return visiblePreview || namedAttachment;
-    }, 45000, 'ChatGPT did not show the analysis image as an attachment. The prompt was not sent; retry after the ChatGPT tab has finished loading.');
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const input = await findFileInput();
+      await stageImage(input, file);
+      try {
+        await waitFor(() => composerAttachmentReady(name), 15000, 'Attachment preview did not appear.');
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await sleep(1000);
+      }
+    }
+    if (lastError) throw new Error('ChatGPT did not show the analysis image as an attachment after three attempts. The prompt was not sent; reload the extension and retry.');
     // Do not rely on an enabled Send button alone: ChatGPT enables it for text
-    // before an attachment finishes processing, which can produce a text-only analysis.
-    await sleep(750);
+    // after the prompt is inserted. Here we detect it before inserting any text,
+    // then leave extra time for ChatGPT's image processing to settle.
+    await sleep(1500);
   }
 
   function setComposerText(element, text) {

@@ -18,7 +18,8 @@
     mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, analysisVerificationAttempts:0, workflowPhase:'idle', aiProgressPercent:0
+    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, analysisRepairAttempts:0, analysisVerificationAttempts:0,
+    analysisVerificationPasses:0, regionsVerified:false, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -46,6 +47,7 @@
     state.naturalW=0; state.naturalH=0; state.originalImage=null; state.modifiedImage=null; state.originalDataUrl='';
     state.regions=[]; state.appliedPatches.clear(); state.workCanvas.width=0; state.workCanvas.height=0;
     state.uploadRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[];
+    state.analysisVerificationPasses=0; state.regionsVerified=false;
     for(const input of [els.modFile,els.origFile,els.aiOrigFile]) input.value='';
     updateRegionList(); fitCanvasSize();
   }
@@ -116,6 +118,7 @@
     state.naturalW=original.naturalWidth;
     state.naturalH=original.naturalHeight;
     state.regions=[];
+    state.regionsVerified=false;
     state.appliedPatches.clear();
     initializeWorkCanvasFromModified();
     fitCanvasSize();
@@ -177,7 +180,7 @@
     if(state.workCanvas.width&&state.workCanvas.height) ctxModified.drawImage(state.workCanvas,0,0,w,h);
     else if(state.modifiedImage) ctxModified.drawImage(state.modifiedImage,0,0,w,h);
     for(const region of state.regions){
-      drawGuide(els.modCanvas,region);
+      if(state.mode==='manual'||state.regionsVerified)drawGuide(els.modCanvas,region);
       if(state.mode==='manual')drawGuide(els.origCanvas,region);
     }
     if(state.dragging&&state.dragStart&&state.dragCurrent){
@@ -255,6 +258,7 @@
         item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span><span class="region-state ${stateClass}">${escapeHtml(region.status||'pending')}</span></div><textarea aria-label="Edit instruction for region ${index+1}">${escapeHtml(region.instruction||defaultInstruction())}</textarea><div class="region-actions"><button data-action="select">Show</button></div>`;
         item.querySelector('textarea').addEventListener('input',event=>{ region.instruction=event.target.value; updateControls(); });
         item.querySelector('textarea').disabled=!['pending','queued'].includes(region.status||'pending');
+        item.querySelector('[data-action="select"]').disabled=!state.regionsVerified;
       }else{
         item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span></div><div class="region-actions"><button data-action="select">Show</button><button data-action="remove" class="danger">Remove</button></div>`;
       }
@@ -288,12 +292,13 @@
     else if(allEditsDone)els.analyzeBtn.textContent='Puzzle ready';
     else if(!state.originalImage)els.analyzeBtn.textContent='Upload a photo first';
     else if(!state.extensionConnected)els.analyzeBtn.textContent='Waiting for connection';
+    else if(state.regions.length===expectedCount()&&!state.regionsVerified)els.analyzeBtn.textContent='Retry region check';
     else if(state.regions.length===expectedCount())els.analyzeBtn.textContent='Continue generation';
     else els.analyzeBtn.textContent='Generate puzzle';
     els.analyzeBtn.disabled=state.aiBusy?false:(!aiReady||allEditsDone);
     els.analyzeBtn.classList.toggle('danger',state.aiBusy);
     els.analyzeBtn.classList.toggle('primary',!state.aiBusy);
-    els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regions.some(region=>region.status!=='done'));
+    els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regionsVerified&&state.regions.some(region=>region.status!=='done'));
     els.exportBtn.disabled=!(hasImages&&countMatches);
     els.downloadImageBtn.disabled=!hasImages;
     els.downloadBothBtn.disabled=!(hasImages&&countMatches);
@@ -401,7 +406,7 @@
 
   function analysisPrompt(){
     const {width,height}=analysisImageDimensions();
-    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this ${width} by ${height} image and choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently. The faint grid is only a coordinate guide and is not part of the scene. Every finished difference must be findable at normal full-image viewing size without zooming. Aim for medium-impact but tightly localized changes: obvious once noticed, yet limited to one feature, accessory, or clothing detail. Never move a whole arm or leg, change a person's pose or body position, turn a raised limb into a lowered limb, or alter the global composition. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Favor substantial playful changes such as cleanly removing a whole mouth or eyebrow, removing one or two clearly visible fingers, changing a facial expression without changing identity, replacing glasses, adding or removing a hat, changing a collar, replacing a prominent shirt graphic, altering a hairstyle detail, or adding/removing a clearly visible clothing feature. These changes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions. Use no more than 2 color-only changes in a set of 10. Do not choose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or other changes that would be hard to see at normal size. Avoid overlapping regions and image borders. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Coordinate convention is mandatory: the origin 0,0 is the image's upper-left corner; xNorm is the rectangle's LEFT EDGE divided by image width; yNorm is the rectangle's TOP EDGE divided by image height; wNorm and hNorm are its width and height. xNorm and yNorm are never the center point. For example, a box spanning from 30% to 40% across and 20% to 28% down is xNorm 0.30, yNorm 0.20, wNorm 0.10, hNorm 0.08. The rectangle is the exact pixel-change mask, not a pointer identifying the person. For an addition, it must enclose the destination space the new object will occupy plus its attachment point. A cap or hat box must cover the crown/top of the head and space above it, not the face. A glasses box must cover the eyes, and a hand-gesture box must cover the hand and fingers. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Frame only the pixels that must change; the editor adds surrounding context separately. Every rectangle must have wNorm and hNorm greater than 0.018 and should normally be 0.025 to 0.12 in each dimension. Neither dimension may exceed 0.22, and the rectangle must use less than 4% of the image area. Before returning JSON, visually verify that every rectangle actually covers the pixels required by its instruction; replace any mismatched rectangle.`;
+    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this clean, unmarked ${width} by ${height} image and choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently. Every finished difference must be findable at normal full-image viewing size without zooming. Aim for medium-impact but tightly localized changes: obvious once noticed, yet limited to one feature, accessory, or clothing detail. Never move a whole arm or leg, change a person's pose or body position, turn a raised limb into a lowered limb, or alter the global composition. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Favor substantial playful changes such as cleanly removing a whole mouth or eyebrow, removing one or two clearly visible fingers, changing a facial expression without changing identity, replacing glasses, adding or removing a hat, changing a collar, replacing a prominent shirt graphic, altering a hairstyle detail, or adding/removing a clearly visible clothing feature. These changes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions. Use no more than 2 color-only changes in a set of 10. Do not choose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or other changes that would be hard to see at normal size. Avoid overlapping regions and image borders. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Coordinate convention is mandatory: the origin 0,0 is the image's upper-left corner; xNorm is the rectangle's LEFT EDGE divided by image width; yNorm is the rectangle's TOP EDGE divided by image height; wNorm and hNorm are its width and height. xNorm and yNorm are never the center point. For example, a box spanning from 30% to 40% across and 20% to 28% down is xNorm 0.30, yNorm 0.20, wNorm 0.10, hNorm 0.08. The rectangle is the exact pixel-change mask, not a pointer identifying the person. For an addition, it must enclose the destination space the new object will occupy plus its attachment point. A cap or hat box must cover the crown/top of the head and space above it, not the face. A glasses box must cover the eyes, and a hand-gesture box must cover the hand and fingers. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Frame only the pixels that must change; the editor adds surrounding context separately. Every rectangle must have wNorm and hNorm greater than 0.018 and should normally be 0.025 to 0.12 in each dimension. Neither dimension may exceed 0.22, and the rectangle must use less than 4% of the image area. Before returning JSON, visually verify that every rectangle actually covers the pixels required by its instruction; replace any mismatched rectangle.`;
   }
 
   function analysisImageDimensions(){
@@ -416,26 +421,34 @@
     canvas.width=width; canvas.height=height;
     const ctx=canvas.getContext('2d');
     ctx.drawImage(state.originalImage,0,0,width,height);
+    return canvas.toDataURL('image/jpeg',.94);
+  }
+
+  function drawCoordinateGrid(ctx,width,height){
     ctx.save();
-    ctx.lineWidth=Math.max(1,Math.round(Math.min(width,height)/700));
-    ctx.strokeStyle='rgba(255,255,255,.42)';
-    ctx.fillStyle='rgba(0,0,0,.62)';
-    ctx.font=`bold ${Math.max(11,Math.round(Math.min(width,height)/65))}px system-ui`;
-    for(let step=1;step<10;step++){
-      const x=Math.round(width*step/10),y=Math.round(height*step/10);
+    const fontSize=Math.max(11,Math.round(Math.min(width,height)/72));
+    ctx.font=`bold ${fontSize}px system-ui`;
+    ctx.lineWidth=Math.max(1,Math.round(Math.min(width,height)/900));
+    for(let step=1;step<20;step++){
+      const fraction=step/20,x=Math.round(width*fraction),y=Math.round(height*fraction);
+      const major=step%2===0;
+      ctx.strokeStyle=major?'rgba(255,255,255,.44)':'rgba(255,255,255,.22)';
       ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();
       ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();
-      ctx.fillText((step/10).toFixed(1),x+3,Math.max(13,parseInt(ctx.font,10)));
-      ctx.fillText((step/10).toFixed(1),3,y-3);
+      if(major){
+        ctx.fillStyle='rgba(0,0,0,.72)';
+        ctx.fillText(fraction.toFixed(2),x+3,fontSize+2);
+        ctx.fillText(fraction.toFixed(2),3,y-3);
+      }
     }
     ctx.restore();
-    return canvas.toDataURL('image/jpeg',.94);
   }
 
   function annotatedRegionsDataUrl(){
     const {width,height}=analysisImageDimensions();
     const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
     const ctx=canvas.getContext('2d');ctx.drawImage(state.originalImage,0,0,width,height);
+    drawCoordinateGrid(ctx,width,height);
     const lineWidth=Math.max(3,Math.round(Math.min(width,height)/220));
     const fontSize=Math.max(16,Math.round(Math.min(width,height)/34));
     ctx.font=`bold ${fontSize}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';
@@ -453,12 +466,13 @@
 
   function verificationPrompt(){
     const proposed=state.regions.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction},index)=>({number:index+1,xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
-    return `Verify the numbered proposed regions in the newly attached review image against the original image and these instructions: ${JSON.stringify(proposed)}. Treat each cyan rectangle as the exact pixel-change mask, not as a pointer identifying the student. For every number, confirm that the rectangle covers every pixel area needed to perform its instruction while excluding unrelated face, body, and background. Correct every misplaced or unsuitable rectangle, even if it identifies the right person. For additions, the rectangle must enclose the destination space where the new object will appear plus its attachment point. A baseball cap or hat requires the crown/top of the head and space above it, not the face. Glasses require the eye area. A hand gesture requires the hand and fingers. Keep genuinely correct rectangles unchanged. Return exactly ${expectedCount()} objects as one valid JSON array only, in the same numbered order, with xNorm, yNorm, wNorm, hNorm, changeType, instruction, and targetCheck. targetCheck must be a specific sentence explaining which visible pixels the rectangle covers and why that area can contain the requested change; generic claims such as box is correct are invalid. The origin is the upper-left of the full image. xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center. wNorm and hNorm are width and height. Frame only the actual change pixels, not the surrounding person. Neither dimension may exceed 0.22 and each box must cover less than 4% of the image. Before responding, re-check visually that every corrected box is appropriate for its requested edit.`;
+    return `Verify the numbered proposed regions in the newly attached review image against the original image and these instructions: ${JSON.stringify(proposed)}. The faint coordinate grid is spaced every 0.05; darker labeled lines are spaced every 0.10. Treat each cyan rectangle as the exact pixel-change mask, not as a pointer identifying the student. Assume every box is wrong until you have checked all four cyan edges against the visible feature. A box that merely overlaps its target, clips part of it, sits above or beside it, or includes unrelated face, body, or background pixels must be corrected. For every number, confirm that the rectangle covers every pixel area needed to perform its instruction while excluding unrelated pixels. Correct every misplaced or unsuitable rectangle, even if it identifies the right person. For additions, the rectangle must enclose the destination space where the new object will appear plus its attachment point. A baseball cap or hat requires the crown/top of the head and space above it, not the face. Glasses require all of both lenses and the bridge, not the forehead above them. A hand gesture requires the hand and fingers. Keep a rectangle unchanged only after checking its top, right, bottom, and left edges. Return exactly ${expectedCount()} objects as one valid JSON array only, in the same numbered order, with xNorm, yNorm, wNorm, hNorm, changeType, instruction, and targetCheck. targetCheck must specifically name the visible pixels at the box's top, right, bottom, and left edges and explain why the whole requested feature fits; generic claims such as box is correct are invalid. The origin is the upper-left of the full image. xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center. wNorm and hNorm are width and height. Frame only the actual change pixels, not the surrounding person. Neither dimension may exceed 0.22 and each box must cover less than 4% of the image. Before responding, re-check visually that every corrected box is appropriate for its requested edit.`;
   }
 
   function requestRegionVerification(){
-    if(state.analysisVerificationAttempts>=2)return false;
+    if(state.analysisVerificationAttempts>=4)return false;
     state.analysisVerificationAttempts++;
+    state.regionsVerified=false;
     setExtensionStatus('busy','Verifying the numbered regions…');
     els.aiRunStatus.textContent='Step 1 of 2: checking every box against the feature it names…';
     setAiProgress(Math.max(state.aiProgressPercent,13));
@@ -536,6 +550,7 @@
       else if(region.wNorm>.22||region.hNorm>.22)reason='rectangle is too wide or tall for a localized difference';
       else if(region.wNorm*region.hNorm>=.04)reason='rectangle covers 4% or more of the image';
       else if(requireTargetCheck&&targetCheck.length<24)reason='visual verification did not explain why the rectangle fits the requested edit';
+      else if(requireTargetCheck&&![/\btop\b/i,/\bright\b/i,/\bbottom\b/i,/\bleft\b/i].every(pattern=>pattern.test(targetCheck)))reason='visual verification did not describe all four rectangle edges';
       else if(requireTargetCheck&&/\b(?:cap|hat)\b/i.test(region.instruction)&&!/(?:top|crown|above|hair|head)/i.test(targetCheck))reason='hat or cap region was not verified against the top of the head and destination space';
       else if(normalized.some(existing=>regionOverlap(existing,region)>.2))reason='rectangle overlaps an accepted suggestion by more than 20%';
       else if(region.changeType==='color'&&normalized.filter(existing=>existing.changeType==='color').length>=2)reason='the set already contains the maximum of two color-only changes';
@@ -585,6 +600,8 @@
     state.workflowPhase='analysis';
     state.analysisRepairAttempts=0;
     state.analysisVerificationAttempts=0;
+    state.analysisVerificationPasses=0;
+    state.regionsVerified=false;
     setExtensionStatus('busy','ChatGPT is inspecting the image…');
     setAiProgress(2);
     els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
@@ -601,18 +618,20 @@
   function startAiWorkflow(){
     if(state.aiBusy)return;
     const pending=state.regions.filter(region=>region.status!=='done');
-    if(state.regions.length===expectedCount()&&pending.length)startEditQueue(pending);
+    if(state.regionsVerified&&state.regions.length===expectedCount()&&pending.length)startEditQueue(pending);
     else startAnalysis();
   }
 
   function startGeneration(){
     if(state.aiBusy)return;
+    if(state.mode==='ai'&&!state.regionsVerified)return;
     const pending=state.regions.filter(region=>region.status!=='done');
     startEditQueue(pending);
   }
 
   function startEditQueue(regions){
     if(state.aiBusy||!state.extensionConnected||!regions.length)return;
+    if(state.mode==='ai'&&!state.regionsVerified)return;
     state.aiBusy=true; state.activeJobId=uid('edit'); state.workflowPhase='editing'; setAiProgress(15);
     setExtensionStatus('busy','ChatGPT edit queue is running…');
     els.aiRunStatus.textContent=`Preparing ${regions.length} crop edit${regions.length===1?'':'s'}…`;
@@ -673,10 +692,20 @@
       try{
         clearJobTimer();
         const validation=validateSuggestedRegions(payload.regions,payload.repair?state.regions:[],!!payload.verified);
-        if(requestMissingRegions(validation))return;
+        if(requestMissingRegions(validation)){
+          state.analysisVerificationPasses=0;
+          state.regionsVerified=false;
+          return;
+        }
         state.regions=validation.accepted.slice(0,expectedCount());
         setAiProgress(Math.max(state.aiProgressPercent,14));
-        if(!payload.verified&&requestRegionVerification())return;
+        if(payload.verified)state.analysisVerificationPasses++;
+        else state.analysisVerificationPasses=0;
+        if(state.analysisVerificationPasses<2){
+          if(requestRegionVerification())return;
+          throw new Error('The proposed regions could not complete two visual alignment checks. No edits were started.');
+        }
+        state.regionsVerified=true;
         state.appliedPatches.clear(); state.aiBusy=false;
         setExtensionStatus('connected',`${state.regions.length} differences selected`);
         els.aiRunStatus.textContent='Differences selected. Starting image edits automatically…';
