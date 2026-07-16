@@ -12,6 +12,7 @@
     ],
     send: ['button[data-testid="send-button"]', 'button[aria-label="Send prompt"]', 'button[aria-label="Send"]'],
     assistant: ['[data-message-author-role="assistant"]'],
+    user: ['[data-message-author-role="user"]'],
     conversationTurn: ['[data-testid^="conversation-turn-"]'],
     generatedCard: ['[role="button"] img[alt^="Generated image:"]'],
     generatedImage: ['img[alt^="Generated image:"]'],
@@ -40,6 +41,35 @@
       await sleep(350);
     }
     throw new Error(message);
+  }
+
+  function waitForDomMutation(getter, timeoutMs, message) {
+    const immediate = getter();
+    if (immediate) return Promise.resolve(immediate);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (value, error) => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        document.removeEventListener('load', check, true);
+        error ? reject(error) : resolve(value);
+      };
+      const check = () => {
+        try {
+          const result = getter();
+          if (result) finish(result);
+        } catch (error) {
+          finish(null, error);
+        }
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      document.addEventListener('load', check, true);
+      const timer = setTimeout(() => finish(null, new Error(message)), timeoutMs);
+      check();
+    });
   }
 
   function dataUrlToFile(dataUrl, name) {
@@ -157,6 +187,12 @@
     return candidates.filter(element => element.textContent?.trim() || element.querySelector('img'));
   }
 
+  function isUserTurn(element) {
+    if (element.querySelector(SELECTORS.user.join(','))) return true;
+    return [...element.querySelectorAll('h1,h2,h3,h4,h5,h6')]
+      .some(heading => /^You said:?$/i.test(heading.textContent?.trim() || ''));
+  }
+
   function extractJson(text) {
     const cleaned = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
     const starts = [cleaned.indexOf('['), cleaned.indexOf('{')].filter(index => index >= 0).sort((a,b) => a-b);
@@ -178,13 +214,16 @@
   }
 
   async function waitForAnalysis(beforeCount, beforeTurnCount) {
-    return waitFor(() => {
+    return waitForDomMutation(() => {
       const messages = assistantMessages();
       // ChatGPT's accessible assistant markers have changed several times. Prefer
       // newly recognized assistant messages, but also inspect only conversation
       // turns created after this request so a visible JSON response cannot be lost
       // merely because its role marker changed.
-      const newTurns = allMatches(SELECTORS.conversationTurn).slice(beforeTurnCount).reverse();
+      const newTurns = allMatches(SELECTORS.conversationTurn)
+        .slice(beforeTurnCount)
+        .filter(turn => !isUserTurn(turn))
+        .reverse();
       const candidates = [...new Set([...messages.slice(beforeCount).reverse(), ...newTurns])];
       for (const message of candidates) {
         const parsed = extractJson(message.innerText || message.textContent || '');
