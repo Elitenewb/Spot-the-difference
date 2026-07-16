@@ -6,6 +6,10 @@
     composer: ['#prompt-textarea', 'textarea[data-id="root"]', 'div[contenteditable="true"][data-placeholder]', 'div[contenteditable="true"]'],
     fileInput: ['input[type="file"][accept*="image"]', 'input[type="file"]'],
     attach: ['button[data-testid="composer-plus-btn"]', 'button[aria-label*="Attach"]', 'button[aria-label*="Add files"]', 'button[aria-label*="Upload"]'],
+    attachmentPreview: [
+      '[data-testid*="attachment-preview"]', '[data-testid*="uploaded-file"]', '[data-testid*="file-upload"]',
+      'button[aria-label*="Remove attachment"]', 'button[aria-label*="Remove file"]', 'button[aria-label*="Remove image"]'
+    ],
     send: ['button[data-testid="send-button"]', 'button[aria-label="Send prompt"]', 'button[aria-label="Send"]'],
     assistant: ['[data-message-author-role="assistant"]'],
     conversationTurn: ['[data-testid^="conversation-turn-"]'],
@@ -66,10 +70,16 @@
     }
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    reportProgress(payload, 'attached', 'Image attached. Waiting for ChatGPT’s composer…');
-    // ChatGPT processes attachments asynchronously. A short settling window plus
-    // the enabled-Send check below is more reliable than clicking immediately.
-    await sleep(2500);
+    reportProgress(payload, 'attached', 'Waiting for ChatGPT to finish attaching the image…');
+    await waitFor(() => {
+      const visiblePreview = allMatches(SELECTORS.attachmentPreview).some(element => element.offsetParent !== null);
+      const namedAttachment = [...document.querySelectorAll('img, [role="button"], button, span, div')]
+        .some(element => element.offsetParent !== null && element.textContent?.includes(name));
+      return visiblePreview || namedAttachment;
+    }, 45000, 'ChatGPT did not show the analysis image as an attachment. The prompt was not sent; retry after the ChatGPT tab has finished loading.');
+    // Do not rely on an enabled Send button alone: ChatGPT enables it for text
+    // before an attachment finishes processing, which can produce a text-only analysis.
+    await sleep(750);
   }
 
   function setComposerText(element, text) {

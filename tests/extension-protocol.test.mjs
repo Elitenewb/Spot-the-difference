@@ -93,6 +93,9 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes("'uploading','attached','submitted'"));
   assert.ok(adapter.includes('SD_CHATGPT_PROGRESS'));
   assert.ok(adapter.includes("input.files?.length !== 1"));
+  assert.ok(adapter.includes('attachmentPreview'));
+  assert.ok(adapter.includes("ChatGPT did not show the analysis image as an attachment"));
+  assert.ok(adapter.indexOf('await uploadImage(payload.imageDataUrl') < adapter.indexOf('await submitPrompt(payload.prompt'), 'an analysis prompt must be submitted only after its image upload completes');
   assert.ok(!adapter.includes("assistant: ['[data-message-author-role=\"assistant\"]', 'article"));
   assert.ok(background.includes('for (let attempt = 0; attempt < 2; attempt++)'));
   assert.ok(background.includes("chrome.storage.session.remove('chatTabId')"));
