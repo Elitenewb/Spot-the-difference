@@ -179,6 +179,8 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(adapter.includes("unavailable|unable|cannot|can't|could not|not available"));
   assert.ok(adapter.includes("conversationTurn: ['[data-testid^=\"conversation-turn-\"]']"));
   assert.ok(adapter.includes('waitForAnalysis(beforeCount, beforeTurnCount)'));
+  assert.ok(adapter.includes('function regionsFromParsedJson(parsed)'));
+  assert.ok(adapter.includes('return isSingleRegion ? [parsed] : null'));
   assert.ok(adapter.includes('allMatches(SELECTORS.conversationTurn).slice(beforeTurnCount).reverse()'));
   assert.ok(adapter.includes('waitForAnalysis(before, beforeTurns)'));
   assert.ok(adapter.includes("generatedCard: ['[role=\"button\"] img[alt^=\"Generated image:\"]']"));

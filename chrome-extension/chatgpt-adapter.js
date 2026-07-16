@@ -168,6 +168,15 @@
     return null;
   }
 
+  function regionsFromParsedJson(parsed) {
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed?.regions)) return parsed.regions;
+    const isSingleRegion = parsed && typeof parsed === 'object' &&
+      ['xNorm', 'yNorm', 'wNorm', 'hNorm'].every(key => Number.isFinite(Number(parsed[key]))) &&
+      typeof (parsed.instruction || parsed.prompt) === 'string';
+    return isSingleRegion ? [parsed] : null;
+  }
+
   async function waitForAnalysis(beforeCount, beforeTurnCount) {
     return waitFor(() => {
       const messages = assistantMessages();
@@ -180,7 +189,7 @@
       for (const message of candidates) {
         const parsed = extractJson(message.innerText || message.textContent || '');
         if (!parsed) continue;
-        const regions = Array.isArray(parsed) ? parsed : parsed.regions;
+        const regions = regionsFromParsedJson(parsed);
         if (Array.isArray(regions)) return regions;
       }
       return null;
