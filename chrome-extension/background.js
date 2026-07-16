@@ -114,6 +114,7 @@ async function forward(appTabId, type, payload) {
 }
 
 async function runAnalysis(payload, appTabId) {
+  let started = false;
   try {
     cancelledJobIds.delete(payload.jobId);
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: 'Opening a fresh ChatGPT analysis chat…', completed: 0, total: 1 });
@@ -121,48 +122,51 @@ async function runAnalysis(payload, appTabId) {
       { type: 'SD_CHATGPT_ANALYZE', payload },
       { appTabId, jobId: payload.jobId, kind: 'analysis' }
     );
-    if (!response?.ok) throw new Error(response?.error || 'ChatGPT analysis did not return a result.');
-    await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions });
+    if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the analysis task.');
+    started = true;
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis') activeJobs.delete(tabId);
   }
 }
 
 async function runRepairAnalysis(payload, appTabId) {
+  let started = false;
   try {
     cancelledJobIds.delete(payload.jobId);
     const tab = await getChatGptTab();
     activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-repair' });
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: `Requesting ${payload.count} replacement suggestion${payload.count === 1 ? '' : 's'}…`, completed: 0, total: 1 });
     const response = await sendToChatGpt(tab.id, { type: 'SD_CHATGPT_REPAIR_ANALYSIS', payload });
-    if (!response?.ok) throw new Error(response?.error || 'ChatGPT replacement analysis did not return a result.');
-    await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions, repair: true });
+    if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the replacement task.');
+    started = true;
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-repair') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-repair') activeJobs.delete(tabId);
   }
 }
 
 async function runVerifyAnalysis(payload, appTabId) {
+  let started = false;
   try {
     const tab = await getChatGptTab();
     activeJobs.set(tab.id, { appTabId, jobId: payload.jobId, kind: 'analysis-verify' });
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId: payload.jobId, message: 'ChatGPT is checking every numbered region against its target…', completed: 0, total: 1 });
     const response = await sendToChatGpt(tab.id, { type: 'SD_CHATGPT_VERIFY_ANALYSIS', payload });
-    if (!response?.ok) throw new Error(response?.error || 'ChatGPT region verification did not return a result.');
-    await forward(appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: payload.jobId, regions: response.regions, verified: true });
+    if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the verification task.');
+    started = true;
   } catch (error) {
     if (!cancelledJobIds.has(payload.jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: payload.jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-verify') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === payload.jobId && job.kind === 'analysis-verify') activeJobs.delete(tabId);
   }
 }
 
 async function runEdit(payload, appTabId) {
   const { jobId, edit } = payload;
+  let started = false;
   try {
     cancelledJobIds.delete(jobId);
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId, regionId: edit.regionId, status: 'editing', message: 'Opening a fresh ChatGPT edit chat…' });
@@ -171,15 +175,39 @@ async function runEdit(payload, appTabId) {
       { appTabId, jobId, kind: 'edit', regionId: edit.regionId },
       false
     );
-    if (!response?.ok) throw new Error(response?.error || 'ChatGPT did not return an edited image.');
-    let imageDataUrl = response.imageDataUrl;
-    if (!imageDataUrl && response.imageUrl) imageDataUrl = await fetchAsDataUrl(response.imageUrl);
-    if (!imageDataUrl) throw new Error('The generated image could not be retrieved from ChatGPT.');
-    await forward(appTabId, 'SPOT_DIFF_EDIT_RESULT', { jobId, regionId: edit.regionId, imageDataUrl });
+    if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the edit task.');
+    started = true;
   } catch (error) {
     if (!cancelledJobIds.has(jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of activeJobs) if (job.jobId === jobId && job.kind === 'edit') activeJobs.delete(tabId);
+    if (!started) for (const [tabId, job] of activeJobs) if (job.jobId === jobId && job.kind === 'edit') activeJobs.delete(tabId);
+  }
+}
+
+async function handleTaskResult(payload, chatTabId) {
+  const job = activeJobs.get(chatTabId);
+  if (!job || payload?.jobId !== job.jobId || payload?.kind !== job.kind) return false;
+  try {
+    if (jobWasCancelled(job)) return true;
+    if (!payload.ok) throw new Error(payload.error || 'ChatGPT task failed.');
+    if (job.kind === 'analysis') {
+      await forward(job.appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: job.jobId, regions: payload.regions });
+    } else if (job.kind === 'analysis-repair') {
+      await forward(job.appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: job.jobId, regions: payload.regions, repair: true });
+    } else if (job.kind === 'analysis-verify') {
+      await forward(job.appTabId, 'SPOT_DIFF_ANALYSIS_RESULT', { jobId: job.jobId, regions: payload.regions, verified: true });
+    } else if (job.kind === 'edit') {
+      let imageDataUrl = payload.imageDataUrl;
+      if (!imageDataUrl && payload.imageUrl) imageDataUrl = await fetchAsDataUrl(payload.imageUrl);
+      if (!imageDataUrl) throw new Error('The generated image could not be retrieved from ChatGPT.');
+      await forward(job.appTabId, 'SPOT_DIFF_EDIT_RESULT', { jobId: job.jobId, regionId: job.regionId, imageDataUrl });
+    }
+    return true;
+  } catch (error) {
+    if (!cancelledJobIds.has(job.jobId)) await forward(job.appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: job.jobId, message: error.message });
+    return true;
+  } finally {
+    activeJobs.delete(chatTabId);
   }
 }
 
@@ -211,6 +239,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
     return;
+  }
+  if (message.type === 'SD_CHATGPT_TASK_RESULT') {
+    handleTaskResult(message.payload, sender.tab.id).then(received => sendResponse({ received }));
+    return true;
   }
   if (message.type === 'SPOT_DIFF_ANALYZE') {
     if (!validAnalysisPayload(message.payload)) return;

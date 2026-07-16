@@ -317,22 +317,36 @@
     return waitForEditedImage(beforeUrls, before, payload);
   }
 
+  function startTask(kind, payload, task) {
+    task().then(result => chrome.runtime.sendMessage({
+      type: 'SD_CHATGPT_TASK_RESULT',
+      payload: { jobId: payload.jobId, regionId: payload.regionId, kind, ok: true, ...result }
+    })).catch(error => chrome.runtime.sendMessage({
+      type: 'SD_CHATGPT_TASK_RESULT',
+      payload: { jobId: payload.jobId, regionId: payload.regionId, kind, ok: false, error: error.message }
+    })).catch(() => {});
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'SD_CHATGPT_ANALYZE') {
-      runAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
-      return true;
+      startTask('analysis', message.payload, () => runAnalysis(message.payload).then(regions => ({ regions })));
+      sendResponse({ accepted: true });
+      return;
     }
     if (message.type === 'SD_CHATGPT_REPAIR_ANALYSIS') {
-      runRepairAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
-      return true;
+      startTask('analysis-repair', message.payload, () => runRepairAnalysis(message.payload).then(regions => ({ regions })));
+      sendResponse({ accepted: true });
+      return;
     }
     if (message.type === 'SD_CHATGPT_VERIFY_ANALYSIS') {
-      runVerifyAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
-      return true;
+      startTask('analysis-verify', message.payload, () => runVerifyAnalysis(message.payload).then(regions => ({ regions })));
+      sendResponse({ accepted: true });
+      return;
     }
     if (message.type === 'SD_CHATGPT_EDIT') {
-      runEdit(message.payload).then(result => sendResponse({ ok: true, ...result })).catch(error => sendResponse({ ok: false, error: error.message }));
-      return true;
+      startTask('edit', message.payload, () => runEdit(message.payload));
+      sendResponse({ accepted: true });
+      return;
     }
   });
 })();

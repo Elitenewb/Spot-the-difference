@@ -33,7 +33,7 @@ function loadBackgroundHarness() {
       async create(options) { creations.push(options); return { id: 77, ...options }; },
       async get(tabId) { return { id: tabId }; },
       async remove() {},
-      async sendMessage(tabId, message) { sentMessages.push({ tabId, message }); return { ok: true, regions: [] }; }
+      async sendMessage(tabId, message) { sentMessages.push({ tabId, message }); return { accepted: true }; }
     },
     runtime: { onMessage: { addListener() {} } }
   };
@@ -72,14 +72,14 @@ test('fresh-chat runner retries once after losing its ChatGPT tab', async () => 
   context.chrome.tabs.sendMessage = async () => {
     sends++;
     if (sends <= 15) throw new Error('Receiving end does not exist');
-    return { ok: true, imageDataUrl: 'data:image/png;base64,AAAA' };
+    return { accepted: true };
   };
   const result = await context.runInFreshChat(
     { type: 'SD_CHATGPT_EDIT', payload: { jobId: 'job' } },
     { appTabId: 1, jobId: 'job', kind: 'edit' },
     false
   );
-  assert.equal(result.ok, true);
+  assert.equal(result.accepted, true);
   assert.equal(sends, 16);
 });
 
@@ -93,6 +93,8 @@ test('replacement analysis continues in the existing chat without opening a fres
   assert.equal(sentMessages.length, 1);
   assert.equal(sentMessages[0].tabId, 42);
   assert.equal(sentMessages[0].message.type, 'SD_CHATGPT_REPAIR_ANALYSIS');
+  assert.equal(forwarded.length, 1, 'only the progress message is sent before task completion');
+  await context.handleTaskResult({ jobId: 'repair-job', kind: 'analysis-repair', ok: true, regions: [{ xNorm: .1 }] }, 42);
   assert.equal(forwarded.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT');
   assert.equal(forwarded.at(-1).payload.repair, true);
 });
@@ -105,6 +107,7 @@ test('visual region verification stays in the analysis chat and returns a verifi
   await context.runVerifyAnalysis({ jobId: 'verify-job', count: 10, imageDataUrl: 'data:image/jpeg;base64,AAAA', prompt: 'Verify every box.' }, 5);
   assert.equal(updates.length, 0);
   assert.equal(sentMessages[0].message.type, 'SD_CHATGPT_VERIFY_ANALYSIS');
+  await context.handleTaskResult({ jobId: 'verify-job', kind: 'analysis-verify', ok: true, regions: [] }, 42);
   assert.equal(forwarded.at(-1).type, 'SPOT_DIFF_ANALYSIS_RESULT');
   assert.equal(forwarded.at(-1).payload.verified, true);
 });

@@ -103,6 +103,10 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('els.need.disabled=state.aiBusy'));
   assert.ok(creator.includes("'uploading','attached','submitted'"));
   assert.ok(adapter.includes('SD_CHATGPT_PROGRESS'));
+  assert.ok(adapter.includes('SD_CHATGPT_TASK_RESULT'));
+  assert.ok(adapter.includes("sendResponse({ accepted: true })"));
+  assert.ok(background.includes("message.type === 'SD_CHATGPT_TASK_RESULT'"));
+  assert.ok(background.includes('async function handleTaskResult(payload, chatTabId)'));
   assert.ok(adapter.includes("input.files?.length !== 1"));
   assert.ok(adapter.includes('attachmentPreview'));
   assert.ok(adapter.includes('composerAttachmentReady(name)'));
