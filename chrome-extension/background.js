@@ -182,6 +182,10 @@ async function fetchAsDataUrl(url) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!sender.tab?.id) return;
+  if (message.type === 'SPOT_DIFF_BRIDGE_PING') {
+    sendResponse({ ok: true });
+    return;
+  }
   if (message.type === 'SD_CHATGPT_PROGRESS') {
     const job = activeJobs.get(sender.tab.id);
     if (job && message.payload?.jobId === job.jobId) {

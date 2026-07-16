@@ -35,7 +35,7 @@ test('creator bridge responds to ping and relays only allowed requests', async (
   };
   const chromeMock = {
     runtime: {
-      sendMessage(message) { sent.push(message); return Promise.resolve({ accepted: true }); },
+      sendMessage(message) { sent.push(message); return Promise.resolve(message.type === 'SPOT_DIFF_BRIDGE_PING' ? { ok: true } : { accepted: true }); },
       onMessage: { addListener(listener) { runtimeListeners.push(listener); } }
     }
   };
@@ -43,18 +43,20 @@ test('creator bridge responds to ping and relays only allowed requests', async (
   vm.runInNewContext(code, { window: windowMock, chrome: chromeMock });
 
   windowListeners[0]({ source: windowMock, data: { source: 'spot-diff-app', type: 'SPOT_DIFF_EXTENSION_PING' } });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(posted.at(-1).type, 'SPOT_DIFF_EXTENSION_PONG');
+  assert.equal(sent[0].type, 'SPOT_DIFF_BRIDGE_PING');
 
   const tinyPng = 'data:image/png;base64,AAAA';
   windowListeners[0]({ source: windowMock, data: { source: 'spot-diff-app', type: 'SPOT_DIFF_ANALYZE', payload: { jobId: 'a', imageDataUrl: tinyPng, prompt: 'Choose regions', count: 10 } } });
   windowListeners[0]({ source: windowMock, data: { source: 'spot-diff-app', type: 'NOT_ALLOWED', payload: {} } });
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].type, 'SPOT_DIFF_ANALYZE');
-  assert.equal(sent[0].payload.jobId, 'a');
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].type, 'SPOT_DIFF_ANALYZE');
+  assert.equal(sent[1].payload.jobId, 'a');
 
   windowListeners[0]({ source: windowMock, data: { source: 'spot-diff-app', type: 'SPOT_DIFF_REPAIR_ANALYSIS', payload: { jobId: 'a', prompt: 'Return one replacement region.', count: 1 } } });
-  assert.equal(sent.length, 2);
-  assert.equal(sent[1].type, 'SPOT_DIFF_REPAIR_ANALYSIS');
+  assert.equal(sent.length, 3);
+  assert.equal(sent[2].type, 'SPOT_DIFF_REPAIR_ANALYSIS');
 
   runtimeListeners[0]({ type: 'SPOT_DIFF_ANALYSIS_RESULT', payload: { jobId: 'a', regions: [] } });
   assert.equal(posted.at(-1).source, 'spot-diff-extension');
@@ -64,7 +66,7 @@ test('creator bridge responds to ping and relays only allowed requests', async (
   assert.equal(posted.at(-1).type, 'SPOT_DIFF_JOB_CANCELLED');
 
   windowListeners[0]({ source: windowMock, data: { source: 'spot-diff-app', type: 'SPOT_DIFF_ANALYZE', payload: { jobId: 'bad', imageDataUrl: 'https://example.test/private.png', prompt: 'Upload this', count: 10 } } });
-  assert.equal(sent.length, 2, 'invalid or remote image payload must not be relayed');
+  assert.equal(sent.length, 3, 'invalid or remote image payload must not be relayed');
   runtimeListeners[0]({ type: 'SPOT_DIFF_UNEXPECTED', payload: { secret: true } });
   assert.equal(posted.at(-1).type, 'SPOT_DIFF_JOB_CANCELLED', 'unexpected background messages must not enter the page');
 });
@@ -73,6 +75,9 @@ test('message protocol names agree across creator and extension layers', () => {
   const creator = fs.readFileSync(new URL('../creator.js', import.meta.url), 'utf8');
   const bridge = fs.readFileSync(new URL('../chrome-extension/app-bridge.js', import.meta.url), 'utf8');
   const background = fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8');
+  assert.ok(bridge.includes('SPOT_DIFF_BRIDGE_PING'));
+  assert.ok(background.includes('SPOT_DIFF_BRIDGE_PING'));
+  assert.ok(bridge.includes('try {\n      return Promise.resolve(chrome.runtime.sendMessage(message))'));
   for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']) {
     assert.ok(creator.includes(type), `creator missing ${type}`);
     assert.ok(bridge.includes(type), `bridge missing ${type}`);

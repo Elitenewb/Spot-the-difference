@@ -19,21 +19,37 @@
     return edit && validText(edit.regionId, 120) && validImage(edit.imageDataUrl) && validText(edit.prompt, 12_000);
   }
 
+  function reportRuntimeError(error, jobId) {
+    window.postMessage({
+      source: 'spot-diff-extension',
+      type: 'SPOT_DIFF_AI_ERROR',
+      payload: { jobId, message: error?.message || 'The extension background worker could not be reached. Refresh this Creator tab after reloading the extension.' }
+    }, '*');
+  }
+
+  function sendToRuntime(message, jobId, reportErrors = true) {
+    try {
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(error => {
+        if (reportErrors) reportRuntimeError(error, jobId);
+        return null;
+      });
+    } catch (error) {
+      if (reportErrors) reportRuntimeError(error, jobId);
+      return Promise.resolve(null);
+    }
+  }
+
   window.addEventListener('message', event => {
     if (event.source !== window || event.data?.source !== 'spot-diff-app') return;
     const { type, payload } = event.data;
     if (type === 'SPOT_DIFF_EXTENSION_PING') {
-      window.postMessage({ source: 'spot-diff-extension', type: 'SPOT_DIFF_EXTENSION_PONG' }, '*');
+      sendToRuntime({ type: 'SPOT_DIFF_BRIDGE_PING' }, null, false).then(response => {
+        if (response?.ok) window.postMessage({ source: 'spot-diff-extension', type: 'SPOT_DIFF_EXTENSION_PONG' }, '*');
+      });
       return;
     }
     if (!allowedTypes.has(type) || !validRequest(type, payload)) return;
-    chrome.runtime.sendMessage({ type, payload }).catch(error => {
-      window.postMessage({
-        source: 'spot-diff-extension',
-        type: 'SPOT_DIFF_AI_ERROR',
-        payload: { jobId: payload?.jobId, message: error.message || 'The extension background worker could not be reached.' }
-      }, '*');
-    });
+    sendToRuntime({ type, payload }, payload?.jobId);
   });
 
   chrome.runtime.onMessage.addListener(message => {
