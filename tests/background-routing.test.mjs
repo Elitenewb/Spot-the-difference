@@ -69,12 +69,12 @@ function loadBackgroundHarness() {
   return { context, updates, creations, sentMessages, removeListeners, sessionStore, createdAlarms, clearedAlarms, alarmStore };
 }
 
-test('analysis and crop editing both use temporary chats', async () => {
+test('analysis uses temporary chat while crop editing uses regular chat', async () => {
   const { context, updates } = loadBackgroundHarness();
   await context.openFreshChat(10, true);
-  await context.openFreshChat(11, true);
+  await context.openFreshChat(11, false);
   assert.match(updates[0].url, /temporary-chat=true/);
-  assert.match(updates[1].url, /temporary-chat=true/);
+  assert.doesNotMatch(updates[1].url, /temporary-chat=true/);
   assert.match(updates[0].url, /spotJob=/);
   assert.match(updates[1].url, /spotJob=/);
   assert.equal(updates[0].active, true);
@@ -113,7 +113,7 @@ test('fresh-chat runner retries once after losing its ChatGPT tab', async () => 
   const result = await context.runInFreshChat(
     { type: 'SD_CHATGPT_EDIT', payload: { jobId: 'job' } },
     { appTabId: 1, jobId: 'job', kind: 'edit' },
-    true
+    false
   );
   assert.equal(result.ok, true);
   assert.equal(sends, 16);

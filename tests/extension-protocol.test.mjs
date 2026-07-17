@@ -140,7 +140,7 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(background.includes("chrome.windows.create({ url: CHATGPT_URL, focused: false, type: 'normal' })"));
   assert.ok(background.includes('active: true'));
   assert.ok(background.includes("runInFreshChat(message, job, temporary = true)"));
-  assert.ok(background.includes("true\n    );"), 'edit jobs should use temporary chat mode');
+  assert.ok(background.includes("false\n    );"), 'edit jobs should use regular chat mode');
   assert.ok(creator.includes('TOOL POLICY: Do not call Adobe, Photoshop, Canva'));
   assert.ok(creator.includes('Do not open an external editor or ask for tool permission'));
   assert.ok(creator.includes("function expectedCount(){ return state.mode==='ai'?10"));
