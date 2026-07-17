@@ -266,7 +266,7 @@ async function runEdit(payload, appTabId) {
     const response = await runInFreshChat(
       { type: 'SD_CHATGPT_EDIT', payload: { ...edit, jobId } },
       { appTabId, jobId, kind: 'edit', regionId: edit.regionId },
-      false
+      true
     );
     if (!response?.ok) throw new Error(response?.error || 'ChatGPT did not return an edited image.');
     let imageDataUrl = response.imageDataUrl;
