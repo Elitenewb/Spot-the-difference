@@ -43,7 +43,7 @@
     throw new Error(message);
   }
 
-  function waitForDomMutation(getter, timeoutMs, message) {
+  function waitForDomMutation(getter) {
     const immediate = getter();
     if (immediate) return Promise.resolve(immediate);
     return new Promise((resolve, reject) => {
@@ -52,7 +52,6 @@
         if (settled) return;
         settled = true;
         observer.disconnect();
-        clearTimeout(timer);
         clearInterval(interval);
         document.removeEventListener('load', check, true);
         error ? reject(error) : resolve(value);
@@ -69,7 +68,6 @@
       observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
       document.addEventListener('load', check, true);
       const interval = setInterval(check, 1000);
-      const timer = setTimeout(() => finish(null, new Error(message)), timeoutMs);
       check();
     });
   }
@@ -229,12 +227,25 @@
     return new Set(regionResponseCandidates().map(regionsInMessage).filter(Array.isArray).map(regions => JSON.stringify(regions)));
   }
 
+  function latestRegionResponse() {
+    for (const message of regionResponseCandidates().reverse()) {
+      const regions = regionsInMessage(message);
+      if (Array.isArray(regions)) return regions;
+    }
+    return null;
+  }
+
+  async function probeAnalysis() {
+    // A message from the service worker wakes a throttled background tab. Give
+    // ChatGPT's queued render work a moment to settle, then inspect once more.
+    let regions = latestRegionResponse();
+    if (regions) return regions;
+    await sleep(1000);
+    return latestRegionResponse();
+  }
+
   async function waitForAnalysis(beforeSignatures) {
     return waitForDomMutation(() => {
-      // A parseable array can briefly exist before ChatGPT has finished streaming.
-      // Preserve the original flow's UI completion cue: do not advance until the
-      // Stop control has disappeared and the response is visibly finished.
-      if (firstMatch(SELECTORS.stop)) return null;
       const candidates = regionResponseCandidates().reverse();
       for (const message of candidates) {
         const regions = regionsInMessage(message);
@@ -242,7 +253,7 @@
         if (!beforeSignatures.has(JSON.stringify(regions))) return regions;
       }
       return null;
-    }, 180000, 'ChatGPT did not return parseable region JSON within three minutes.');
+    });
   }
 
   async function waitForEditedImage(beforeUrls, beforeCount, payload) {
@@ -298,7 +309,9 @@
     reportProgress(payload, 'uploading', 'Uploading the analysis image to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-original.jpg', payload);
     await submitPrompt(payload.prompt, payload, before);
-    return waitForAnalysis(beforeSignatures);
+    const regions = await waitForAnalysis(beforeSignatures);
+    reportProgress(payload, 'parsed', `Parsed ${regions.length} region suggestions from ChatGPT.`);
+    return regions;
   }
 
   async function runRepairAnalysis(payload) {
@@ -327,36 +340,26 @@
     return waitForEditedImage(beforeUrls, before, payload);
   }
 
-  function startTask(kind, payload, task) {
-    task().then(result => chrome.runtime.sendMessage({
-      type: 'SD_CHATGPT_TASK_RESULT',
-      payload: { jobId: payload.jobId, regionId: payload.regionId, kind, ok: true, ...result }
-    })).catch(error => chrome.runtime.sendMessage({
-      type: 'SD_CHATGPT_TASK_RESULT',
-      payload: { jobId: payload.jobId, regionId: payload.regionId, kind, ok: false, error: error.message }
-    })).catch(() => {});
-  }
-
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type === 'SD_CHATGPT_PROBE_ANALYSIS') {
+      probeAnalysis().then(regions => sendResponse({ ok: true, pending: !regions, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
     if (message.type === 'SD_CHATGPT_ANALYZE') {
-      startTask('analysis', message.payload, () => runAnalysis(message.payload).then(regions => ({ regions })));
-      sendResponse({ accepted: true });
-      return;
+      runAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
     if (message.type === 'SD_CHATGPT_REPAIR_ANALYSIS') {
-      startTask('analysis-repair', message.payload, () => runRepairAnalysis(message.payload).then(regions => ({ regions })));
-      sendResponse({ accepted: true });
-      return;
+      runRepairAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
     if (message.type === 'SD_CHATGPT_VERIFY_ANALYSIS') {
-      startTask('analysis-verify', message.payload, () => runVerifyAnalysis(message.payload).then(regions => ({ regions })));
-      sendResponse({ accepted: true });
-      return;
+      runVerifyAnalysis(message.payload).then(regions => sendResponse({ ok: true, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
     if (message.type === 'SD_CHATGPT_EDIT') {
-      startTask('edit', message.payload, () => runEdit(message.payload));
-      sendResponse({ accepted: true });
-      return;
+      runEdit(message.payload).then(result => sendResponse({ ok: true, ...result })).catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
   });
 })();

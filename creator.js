@@ -514,7 +514,6 @@
     els.aiRunStatus.textContent=`Rejected ${validation.rejected.length}: ${details}. Requesting ${missing} replacement${missing===1?'':'s'}…`;
     setAiProgress(Math.max(state.aiProgressPercent,12));
     updateRegionList(); draw();
-    armJobTimer(240000,`Replacement analysis ${state.analysisRepairAttempts}`);
     postToExtension('SPOT_DIFF_REPAIR_ANALYSIS',{jobId:state.activeJobId,count:missing,prompt:repairAnalysisPrompt(missing,state.regions,validation.rejected)});
     return true;
   }
@@ -535,7 +534,6 @@
     setExtensionStatus('busy','ChatGPT is inspecting the image…');
     setAiProgress(2);
     els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
-    armJobTimer(240000,'Region analysis');
     postToExtension('SPOT_DIFF_ANALYZE',{jobId:state.activeJobId,imageDataUrl:analysisImageDataUrl(),count:expectedCount(),prompt:analysisPrompt()});
   }
 
