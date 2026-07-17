@@ -452,6 +452,9 @@
       state.regions[1].instruction='';
       const automaticPrompt=editPrompt(state.regions[1],cropGeometry(state.regions[1]),1);
       expect('blank instructions ask ChatGPT to choose a localized edit',automaticPrompt.includes('Choose and perform one clear, playful, natural-looking change'));
+      state.regions[2].instruction='Add a bright red bow inside this area.';
+      const customPrompt=editPrompt(state.regions[2],cropGeometry(state.regions[2]),2);
+      expect('custom instructions are passed into the edit prompt',customPrompt.includes('Perform this requested change: Add a bright red bow inside this area.'));
       expect('edited center pixel is composited',center[0]>180&&center[1]<80);
       expect('pixel outside target remains unchanged',outside===before);
       expect('patch is tracked for deterministic recomposition',state.appliedPatches.has(first.id));

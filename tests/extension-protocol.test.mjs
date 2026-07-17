@@ -149,6 +149,7 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(!workflow.includes('startAnalysis()'), 'manual AI workflow must not ask ChatGPT to choose coordinates');
   assert.ok(workflow.includes('startEditQueue(pending)'));
   assert.ok(creator.includes("'Choose and perform one clear, playful, natural-looking change"));
+  assert.ok(creator.includes('Perform this requested change: ${instruction}'));
   assert.ok(creator.includes("const instruction=String(region.instruction||'').trim()"));
   assert.ok(creator.includes("Never move a whole limb, change a person's pose"));
   assert.ok(creator.includes("checkExtensionBtn.hidden=kind!=='error'"));
