@@ -21,6 +21,7 @@
   };
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const SAFE_EDIT_FOLLOWUP = 'Adjust the edit prompt so the output will be acceptable under image-safety policy. Keep the spot-the-difference change harmless, playful, non-graphic, and localized. If the original target is not allowed, choose a safe nearby detail in the same target area instead. Do not explain or ask questions, do not use external tools, and return one edited image only.';
   const firstMatch = selectors => selectors.map(selector => document.querySelector(selector)).find(Boolean) || null;
   const allMatches = selectors => [...new Set(selectors.flatMap(selector => [...document.querySelectorAll(selector)]))];
   const isVisible = element => !!element && element.getClientRects().length > 0;
@@ -258,34 +259,47 @@
 
   async function waitForEditedImage(beforeUrls, beforeCount, payload) {
     let openedCard = false;
-    const result = await waitFor(() => {
-      const messages = assistantMessages();
-      const responseMessages = messages.slice(beforeCount);
-      const last = responseMessages[responseMessages.length - 1] || messages[messages.length - 1];
-      const generatedImage = responseMessages
-        .flatMap(message => [...message.querySelectorAll(SELECTORS.generatedCard.join(','))])
-        .find(image => !beforeUrls.has(image.currentSrc || image.src));
-      const card = generatedImage?.closest('[role="button"]');
-      if (card && !openedCard) {
-        openedCard = true;
-        reportProgress(payload, 'opening', 'Opening ChatGPT’s generated image…');
-        card.click();
+    let responseStart = beforeCount;
+    let refusalFollowupSent = false;
+    let result;
+    while (!result?.image) {
+      result = await waitFor(() => {
+        const messages = assistantMessages();
+        const responseMessages = messages.slice(responseStart);
+        const last = responseMessages[responseMessages.length - 1] || messages[messages.length - 1];
+        const generatedImage = responseMessages
+          .flatMap(message => [...message.querySelectorAll(SELECTORS.generatedCard.join(','))])
+          .find(image => !beforeUrls.has(image.currentSrc || image.src));
+        const card = generatedImage?.closest('[role="button"]');
+        if (card && !openedCard) {
+          openedCard = true;
+          reportProgress(payload, 'opening', 'Opening ChatGPT’s generated image…');
+          card.click();
+          return null;
+        }
+        const scopedImages = responseMessages.flatMap(message => [...message.querySelectorAll('img')]);
+        const viewerImages = allMatches(SELECTORS.viewerImage);
+        const images = [...new Set([...scopedImages, ...viewerImages])].filter(image => {
+          const source = image.currentSrc || image.src;
+          return source && !beforeUrls.has(source) && image.naturalWidth >= 256 && image.naturalHeight >= 256;
+        });
+        if (images.length) return { image: images[images.length - 1] };
+        if (messages.length > responseStart && !firstMatch(SELECTORS.stop)) {
+          const text = (last.innerText || last.textContent || '').trim();
+          if (text) return { error: text.slice(0, 500) };
+        }
         return null;
-      }
-      const scopedImages = responseMessages.flatMap(message => [...message.querySelectorAll('img')]);
-      const viewerImages = allMatches(SELECTORS.viewerImage);
-      const images = [...new Set([...scopedImages, ...viewerImages])].filter(image => {
-        const source = image.currentSrc || image.src;
-        return source && !beforeUrls.has(source) && image.naturalWidth >= 256 && image.naturalHeight >= 256;
-      });
-      if (images.length) return { image: images[images.length - 1] };
-      if (messages.length > beforeCount && !firstMatch(SELECTORS.stop)) {
-        const text = (last.innerText || last.textContent || '').trim();
-        if (/\b(?:unavailable|unable|cannot|can't|could not|not available)\b/i.test(text)) return { error: text.slice(0, 500) };
-      }
-      return null;
-    }, 300000, 'ChatGPT did not return a retrievable edited image within five minutes.');
-    if (result.error) throw new Error(result.error);
+      }, 300000, 'ChatGPT did not return a retrievable edited image within five minutes.');
+      if (!result.error) break;
+      if (refusalFollowupSent) throw new Error(result.error);
+      refusalFollowupSent = true;
+      reportProgress(payload, 'submitted', 'ChatGPT returned text instead of an image; requesting an acceptable alternative…');
+      const followupBefore = assistantMessages().length;
+      await submitPrompt(SAFE_EDIT_FOLLOWUP, payload, followupBefore);
+      responseStart = followupBefore;
+      openedCard = false;
+      result = null;
+    }
     await waitFor(() => !firstMatch(SELECTORS.stop), 120000, 'ChatGPT’s image generation did not finish.').catch(() => true);
     await sleep(1200);
     const source = result.image.currentSrc || result.image.src;

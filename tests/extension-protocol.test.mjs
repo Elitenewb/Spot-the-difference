@@ -155,6 +155,7 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('adding one scene-appropriate object'));
   assert.ok(creator.includes('swapping one existing item, letter, number, symbol'));
   assert.ok(creator.includes('gently silly transformation'));
+  assert.ok(creator.includes('playful face edits such as changing glasses'));
   assert.ok(creator.includes('Never add, remove, replace, or alter a mustache'));
   assert.ok(creator.includes('Perform this requested change: ${instruction}'));
   assert.ok(creator.includes("const instruction=String(region.instruction||'').trim()"));
@@ -207,9 +208,12 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('The only editable subject is the feature intersecting the center point'));
   assert.ok(creator.includes('Directional words such as left, right, upper, lower, top, or bottom refer to the original full image'));
   assert.ok(creator.includes('must never override the target rectangle in this crop'));
-  assert.ok(creatorHtml.includes('creator.js?v=15'));
+  assert.ok(creatorHtml.includes('creator.js?v=16'));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
-  assert.ok(adapter.includes("unavailable|unable|cannot|can't|could not|not available"));
+  assert.ok(adapter.includes('if (text) return { error: text.slice(0, 500) }'));
+  assert.ok(adapter.includes('Adjust the edit prompt so the output will be acceptable under image-safety policy'));
+  assert.ok(adapter.includes('refusalFollowupSent'));
+  assert.ok(adapter.includes('ChatGPT returned text instead of an image; requesting an acceptable alternative'));
   assert.ok(adapter.includes("conversationTurn: ['[data-testid^=\"conversation-turn-\"]']"));
   assert.ok(adapter.includes('waitForAnalysis(beforeSignatures)'));
   assert.ok(adapter.includes('function regionsFromParsedJson(parsed)'));
