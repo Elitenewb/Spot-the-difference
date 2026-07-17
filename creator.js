@@ -7,18 +7,18 @@
     modFile:$('modFile'), origFile:$('origFile'), aiOrigFile:$('aiOrigFile'), modCanvas:$('modCanvas'), origCanvas:$('origCanvas'),
     modFrame:$('modFrame'), origFrame:$('origFrame'), need:$('need'), regionList:$('regionList'), regionCount:$('regionCount'),
     exportBtn:$('exportBtn'), downloadImageBtn:$('downloadImageBtn'), downloadBothBtn:$('downloadBothBtn'), downloadReadyBtn:$('downloadReadyBtn'), importBtn:$('importBtn'), importFile:$('importFile'),
-    clearBtn:$('clearPoints'), undoBtn:$('undoPoint'), analyzeBtn:$('analyzeBtn'), generateBtn:$('generateBtn'),
+    clearBtn:$('clearPoints'), undoBtn:$('undoPoint'), aiClearBtn:$('aiClearBtn'), aiUndoBtn:$('aiUndoBtn'), aiGenerateBtn:$('aiGenerateBtn'),
     checkExtensionBtn:$('checkExtensionBtn'), extensionStatus:$('extensionStatus'), aiRunStatus:$('aiRunStatus'), aiProgress:$('aiProgress'), aiProgressBar:$('aiProgressBar'), aiProgressText:$('aiProgressText'),
-    patchUpload:$('patchUpload'), modBadge:$('modBadge'), diagnostics:$('creatorDiagnostics'), aiAdvanced:$('aiAdvanced'),
-    uploadStep:$('uploadStep'), generateStep:$('generateStep'), downloadStep:$('downloadStep'),
+    modBadge:$('modBadge'), diagnostics:$('creatorDiagnostics'), aiAdvanced:$('aiAdvanced'),
+    uploadStep:$('uploadStep'), generateStep:$('generateStep'), editStep:$('editStep'), downloadStep:$('downloadStep'), aiRegionCount:$('aiRegionCount'),
     runDiagnostics:$('runCreatorDiagnostics'), loadClassroomFixture:$('loadClassroomFixture'), testLog:$('creatorTestLog')
   };
 
   const state = {
-    mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null, originalDataUrl:'',
+    mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null,
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
-    dragging:false, dragStart:null, dragCurrent:null, uploadRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, editRetries:new Map(), jobTimer:null, analysisRepairAttempts:0, workflowPhase:'idle', aiProgressPercent:0
+    dragging:false, dragStart:null, dragCurrent:null, selectedRegionId:null, activeJobId:null, aiBusy:false,
+    editQueue:[], editCompleted:0, editTotal:0, editRetries:new Map(), jobTimer:null, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -28,7 +28,7 @@
   function uid(prefix='region') { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`; }
   function clamp(value,min,max){ return Math.max(min,Math.min(max,value)); }
   function dpr(){ return Math.max(1,window.devicePixelRatio||1); }
-  function expectedCount(){ return clamp(Number(els.need.value)||10,1,30); }
+  function expectedCount(){ return state.mode==='ai'?10:clamp(Number(els.need.value)||10,1,30); }
   function setAiProgress(value){
     const percent=clamp(Math.round(value),0,100);
     state.aiProgressPercent=percent;
@@ -43,9 +43,9 @@
 
   function resetWorkspace(){
     clearJobTimer();
-    state.naturalW=0; state.naturalH=0; state.originalImage=null; state.modifiedImage=null; state.originalDataUrl='';
+    state.naturalW=0; state.naturalH=0; state.originalImage=null; state.modifiedImage=null;
     state.regions=[]; state.appliedPatches.clear(); state.workCanvas.width=0; state.workCanvas.height=0;
-    state.uploadRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[]; state.editRetries.clear();
+    state.selectedRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[]; state.editRetries.clear();
     for(const input of [els.modFile,els.origFile,els.aiOrigFile]) input.value='';
     updateRegionList(); fitCanvasSize();
   }
@@ -63,7 +63,7 @@
     els.aiPanel.hidden=manual;
     document.body.classList.toggle('ai-simple',!manual);
     document.body.classList.toggle('advanced-open',!manual&&els.aiAdvanced.open);
-    els.modBadge.textContent=manual?'Modified — drag to mark a region':'Generated puzzle preview';
+    els.modBadge.textContent=manual?'Modified — drag to mark a region':'Original photo — drag to mark 10 areas';
     updateControls();
     if(!manual) pingExtension();
   }
@@ -100,7 +100,7 @@
       throw new Error(`Image dimensions must match. Expected ${other.naturalWidth}×${other.naturalHeight}, received ${image.naturalWidth}×${image.naturalHeight}.`);
     }
     if(side==='modified') state.modifiedImage=image;
-    else { state.originalImage=image; state.originalDataUrl=dataUrl; }
+    else state.originalImage=image;
     state.naturalW=image.naturalWidth; state.naturalH=image.naturalHeight;
     if(state.originalImage&&state.modifiedImage) initializeWorkCanvasFromModified();
     fitCanvasSize();
@@ -110,7 +110,6 @@
     const dataUrl=await fileToDataUrl(file);
     const original=await imageFromDataUrl(dataUrl);
     const modified=await imageFromDataUrl(dataUrl);
-    state.originalDataUrl=dataUrl;
     state.originalImage=original;
     state.modifiedImage=modified;
     state.naturalW=original.naturalWidth;
@@ -121,7 +120,7 @@
     fitCanvasSize();
     updateRegionList();
     state.workflowPhase='idle'; setAiProgress(0);
-    els.aiRunStatus.textContent='Photo ready. Click Generate puzzle.';
+    els.aiRunStatus.textContent='Photo ready. Drag 10 boxes on the preview.';
     updateControls();
   }
 
@@ -131,7 +130,7 @@
       const response=await fetch('tests/fixtures/classroom-scene.svg',{cache:'no-store'});
       if(!response.ok)throw new Error(`fixture request failed (${response.status})`);
       await loadAiOriginal(await response.blob());
-      els.aiRunStatus.textContent='Synthetic 1200×675 classroom fixture loaded. The bridge test can now suggest regions.';
+      els.aiRunStatus.textContent='Synthetic 1200×675 classroom fixture loaded. Draw 10 boxes on the preview.';
     }catch(error){
       els.testLog.textContent=`FAIL: could not load bridge fixture: ${error.message}`;
     }
@@ -182,7 +181,8 @@
     }
     if(state.dragging&&state.dragStart&&state.dragCurrent){
       const preview=normToRect(state.dragStart,state.dragCurrent);
-      drawDragPreview(els.modCanvas,preview); drawDragPreview(els.origCanvas,preview);
+      drawDragPreview(els.modCanvas,preview);
+      if(state.mode==='manual')drawDragPreview(els.origCanvas,preview);
     }
     updateControls();
   }
@@ -191,7 +191,7 @@
     const ctx=canvas.getContext('2d');
     const x=region.xNorm*canvas.clientWidth,y=region.yNorm*canvas.clientHeight;
     const w=region.wNorm*canvas.clientWidth,h=region.hNorm*canvas.clientHeight;
-    const selected=region.id===state.uploadRegionId;
+    const selected=region.id===state.selectedRegionId;
     ctx.save();
     ctx.fillStyle=selected?'rgba(255,200,87,.13)':'rgba(123,212,255,.06)';
     ctx.fillRect(x,y,w,h);
@@ -218,7 +218,7 @@
   function dragDistance(a,b){ return Math.hypot((a.xNorm-b.xNorm)*els.modCanvas.clientWidth,(a.yNorm-b.yNorm)*els.modCanvas.clientHeight); }
 
   function beginDrag(event){
-    if(state.mode==='ai'||!state.naturalW||state.regions.length>=expectedCount()||state.aiBusy) return;
+    if(!state.naturalW||state.regions.length>=expectedCount()||state.aiBusy||state.appliedPatches.size) return;
     if(typeof event.preventDefault==='function')event.preventDefault();
     state.dragging=true; state.dragStart=canvasToNorm(event,els.modCanvas); state.dragCurrent=state.dragStart;
   }
@@ -229,9 +229,9 @@
     const end=state.dragCurrent||state.dragStart;
     if(dragDistance(state.dragStart,end)>=MIN_DRAG_PX){
       const rect=normToRect(state.dragStart,end);
-      state.regions.push({...rect,id:uid(),instruction:defaultInstruction(),status:'pending',source:'manual'});
+      state.regions.push({...rect,id:uid(),instruction:state.mode==='ai'?'':defaultInstruction(),status:'pending',source:'manual'});
     }
-    state.dragStart=null; state.dragCurrent=null; updateRegionList(); draw();
+    state.dragStart=null; state.dragCurrent=null; updateSelectionStatus(); updateRegionList(); draw();
   }
 
   function defaultInstruction(){ return 'Make one clear but natural-looking addition or replacement inside the selected area. Preserve lighting, perspective, texture, and everything outside the target.'; }
@@ -246,13 +246,13 @@
     const focusedRegion=document.activeElement?.closest?.('.region-item')?.dataset.id;
     const focusedSelection=document.activeElement?.tagName==='TEXTAREA'?[document.activeElement.selectionStart,document.activeElement.selectionEnd]:null;
     els.regionCount.textContent=`${state.regions.length} / ${expectedCount()}`;
-    if(!state.regions.length){ els.regionList.innerHTML='<div class="region-empty">Drag rectangles on the modified image or ask ChatGPT to suggest them.</div>'; updateControls(); return; }
+    if(!state.regions.length){ els.regionList.innerHTML=`<div class="region-empty">${state.mode==='ai'?'Draw numbered boxes on the preview. Optional instructions will appear here.':'Drag rectangles on the modified image.'}</div>`; updateControls(); return; }
     els.regionList.innerHTML='';
     state.regions.forEach((region,index)=>{
       const item=document.createElement('div'); item.className='region-item'; item.dataset.id=region.id;
       const stateClass=region.status==='done'?'done':region.status==='error'?'error':'';
       if(state.mode==='ai'){
-        item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span><span class="region-state ${stateClass}">${escapeHtml(region.status||'pending')}</span></div><textarea aria-label="Edit instruction for region ${index+1}">${escapeHtml(region.instruction||defaultInstruction())}</textarea><div class="region-actions"><button data-action="select">Show</button></div>`;
+        item.innerHTML=`<div class="region-head"><span class="region-index">${index+1}</span><span class="region-label">${escapeHtml(regionSummary(region))}</span><span class="region-state ${stateClass}">${escapeHtml(region.status||'pending')}</span></div><textarea aria-label="Optional edit instruction for region ${index+1}" placeholder="Optional — leave blank and ChatGPT will choose">${escapeHtml(region.instruction||'')}</textarea><div class="region-actions"><button data-action="select">Show</button></div>`;
         item.querySelector('textarea').addEventListener('input',event=>{ region.instruction=event.target.value; updateControls(); });
         item.querySelector('textarea').disabled=!['pending','queued'].includes(region.status||'pending');
       }else{
@@ -261,7 +261,7 @@
       item.addEventListener('click',event=>{
         const action=event.target.dataset.action; if(!action)return;
         if(state.aiBusy&&action!=='select')return;
-        if(action==='select'){ state.uploadRegionId=region.id; draw(); item.scrollIntoView({block:'nearest'}); }
+        if(action==='select'){ state.selectedRegionId=region.id; draw(); item.scrollIntoView({block:'nearest'}); }
         if(action==='remove'){ state.appliedPatches.delete(region.id); state.regions=state.regions.filter(r=>r.id!==region.id); recomposeAllPatches(); updateRegionList(); draw(); }
       });
       els.regionList.appendChild(item);
@@ -275,25 +275,31 @@
 
   function escapeHtml(value){ const div=document.createElement('div'); div.textContent=String(value??''); return div.innerHTML; }
 
+  function updateSelectionStatus(){
+    if(state.mode!=='ai'||!state.originalImage||state.aiBusy)return;
+    const remaining=expectedCount()-state.regions.length;
+    els.aiRunStatus.textContent=remaining>0?`${state.regions.length} of 10 areas marked. Draw ${remaining} more.`:'All 10 areas marked. Click Generate puzzle.';
+  }
+
   function updateControls(){
     const countMatches=state.regions.length===expectedCount();
     const hasImages=!!(state.originalImage&&state.modifiedImage&&state.naturalW);
-    const instructionsReady=state.regions.every(region=>String(region.instruction||'').trim().length>5);
     const aiReady=state.mode==='ai'&&state.extensionConnected&&!!state.originalImage&&!state.aiBusy;
     const allEditsDone=countMatches&&state.regions.length>0&&state.regions.every(region=>region.status==='done');
+    if(state.mode==='ai')els.modBadge.textContent=allEditsDone?'Finished puzzle preview':state.aiBusy?'Puzzle preview — edits appear here':'Original photo — drag to mark 10 areas';
     els.uploadStep.classList.toggle('done',!!state.originalImage);
-    els.generateStep.classList.toggle('done',allEditsDone);
+    els.generateStep.classList.toggle('done',countMatches);
+    els.editStep.classList.toggle('done',allEditsDone);
     els.downloadStep.classList.toggle('done',allEditsDone);
-    if(state.aiBusy)els.analyzeBtn.textContent='Cancel generation';
-    else if(allEditsDone)els.analyzeBtn.textContent='Puzzle ready';
-    else if(!state.originalImage)els.analyzeBtn.textContent='Upload a photo first';
-    else if(!state.extensionConnected)els.analyzeBtn.textContent='Waiting for connection';
-    else if(state.regions.length===expectedCount())els.analyzeBtn.textContent='Continue generation';
-    else els.analyzeBtn.textContent='Generate puzzle';
-    els.analyzeBtn.disabled=state.aiBusy?false:(!aiReady||allEditsDone);
-    els.analyzeBtn.classList.toggle('danger',state.aiBusy);
-    els.analyzeBtn.classList.toggle('primary',!state.aiBusy);
-    els.generateBtn.disabled=!(aiReady&&countMatches&&instructionsReady&&state.regions.some(region=>region.status!=='done'));
+    if(state.aiBusy)els.aiGenerateBtn.textContent='Cancel generation';
+    else if(allEditsDone)els.aiGenerateBtn.textContent='Puzzle ready';
+    else if(!state.originalImage)els.aiGenerateBtn.textContent='Upload a photo first';
+    else if(!countMatches)els.aiGenerateBtn.textContent=`Mark ${expectedCount()-state.regions.length} more area${expectedCount()-state.regions.length===1?'':'s'}`;
+    else if(!state.extensionConnected)els.aiGenerateBtn.textContent='Waiting for connection';
+    else els.aiGenerateBtn.textContent='Generate puzzle';
+    els.aiGenerateBtn.disabled=state.aiBusy?false:(!aiReady||!countMatches||allEditsDone);
+    els.aiGenerateBtn.classList.toggle('danger',state.aiBusy);
+    els.aiGenerateBtn.classList.toggle('primary',!state.aiBusy);
     els.exportBtn.disabled=!(hasImages&&countMatches);
     els.downloadImageBtn.disabled=!hasImages;
     els.downloadBothBtn.disabled=!(hasImages&&countMatches);
@@ -301,11 +307,14 @@
     els.downloadReadyBtn.textContent=allEditsDone?'Download image + config':'Waiting for generation';
     els.clearBtn.disabled=!state.regions.length||state.aiBusy;
     els.undoBtn.disabled=!state.regions.length||state.aiBusy;
+    els.aiClearBtn.disabled=!state.regions.length||state.aiBusy||state.appliedPatches.size>0;
+    els.aiUndoBtn.disabled=!state.regions.length||state.aiBusy||state.appliedPatches.size>0;
     els.manualTab.disabled=state.aiBusy;
     els.aiTab.disabled=state.aiBusy;
     els.aiOrigFile.disabled=state.aiBusy;
     els.need.disabled=state.aiBusy;
     els.regionCount.textContent=`${state.regions.length} / ${expectedCount()}`;
+    els.aiRegionCount.textContent=`${state.regions.length} / 10`;
   }
 
   function cropGeometry(region){
@@ -328,8 +337,6 @@
     const url=URL.createObjectURL(blob); const link=document.createElement('a'); link.href=url; link.download=name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   function downloadDataUrl(dataUrl,name){ const link=document.createElement('a'); link.href=dataUrl; link.download=name; document.body.appendChild(link); link.click(); link.remove(); }
-  function downloadCrop(region){ const crop=makeCrop(region); downloadDataUrl(crop.dataUrl,`spot-crop-${state.regions.indexOf(region)+1}.png`); }
-
   function editFrameMatches(image,geometry){
     const expectedRatio=geometry.cropW/geometry.cropH;
     const returnedRatio=image.naturalWidth/image.naturalHeight;
@@ -407,36 +414,8 @@
     clearJobTimer();
     const jobId=state.activeJobId;
     state.jobTimer=setTimeout(()=>{
-      if(state.aiBusy&&state.activeJobId===jobId) failAi(`${label} timed out. Check the temporary ChatGPT tab, then retry.`);
+      if(state.aiBusy&&state.activeJobId===jobId) failAi(`${label} timed out. Check the ChatGPT window, then retry.`);
     },milliseconds);
-  }
-
-  function analysisPrompt(){
-    const {width,height}=analysisImageDimensions();
-    return `You are planning a fun classroom spot-the-difference puzzle from the attached clean, unmarked image. The image is exactly ${width} pixels wide by ${height} pixels high. Choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently.
-
-LOCALIZATION IS THE HIGHEST PRIORITY. Do not estimate normalized decimals or percentages by eye. Measure every rectangle in actual pixels on the attached ${width} by ${height} image. Use any available image-analysis or pixel-inspection tools if helpful. For every suggestion return integer xPx, yPx, wPx, and hPx values: xPx and yPx are the LEFT and TOP pixel edges; wPx and hPx are pixel width and height. The origin 0,0 is the image's upper-left corner. The rectangle center must visibly intersect the exact feature named in the instruction. Before answering, inspect all rectangles again and replace any whose center or coverage does not match its instruction.
-
-Each rectangle is the exact pixel-change mask, not a pointer to a person. It must cover every pixel the requested edit could need. A hat or crown includes the top of the head and destination space above it; glasses include both lenses and frames; a bow tie includes the neckline; a shirt-graphic replacement includes the whole graphic; a hand edit includes the complete hand and fingers. Keep regions localized and non-overlapping, but never trade correct placement or complete coverage for a smaller box.
-
-Make every difference findable at normal full-image viewing size. Favor medium-impact playful additions and replacements; use additions or replacements for at least 6 of 10 and no more than 2 color-only changes. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Good changes include harmlessly removing a mouth or eyebrow, changing an expression without changing identity, replacing glasses, adding a hat, changing a collar, replacing a prominent shirt graphic, or altering a hairstyle detail. Never move a whole limb, change a pose or body position, alter the global composition, or make anything gross, disturbing, insulting, sexual, offensive, injury-like, or grotesque. Do not choose tiny logos, punctuation, rings, pins, isolated buttons, single shoelaces, or minuscule marks.
-
-Return valid JSON only: an array of objects containing integer xPx, yPx, wPx, hPx, a changeType of add, replace, remove, color, or detail, and one specific instruction. Do not return xNorm/yNorm coordinates. Do not put quotation-mark characters inside instruction values. Describe each target by visible attributes that remain useful after cropping, not only by full-image phrases such as upper-right person or leftmost student.`;
-  }
-
-  function analysisImageDimensions(){
-    const maxSide=1600;
-    const scale=Math.min(1,maxSide/Math.max(state.naturalW,state.naturalH));
-    return {width:Math.max(1,Math.round(state.naturalW*scale)),height:Math.max(1,Math.round(state.naturalH*scale))};
-  }
-
-  function analysisImageDataUrl(){
-    const {width,height}=analysisImageDimensions();
-    const canvas=document.createElement('canvas');
-    canvas.width=width; canvas.height=height;
-    const ctx=canvas.getContext('2d');
-    ctx.drawImage(state.originalImage,0,0,width,height);
-    return canvas.toDataURL('image/jpeg',.94);
   }
 
   async function runCreatorDiagnostics(){
@@ -450,7 +429,7 @@ Return valid JSON only: an array of objects containing integer xPx, yPx, wPx, hP
       sctx.fillStyle=gradient; sctx.fillRect(0,0,1200,675);
       sctx.fillStyle='#f5e9cf'; for(let y=70;y<620;y+=130) for(let x=90;x<1120;x+=210)sctx.fillRect(x,y,54,34);
       const dataUrl=source.toDataURL('image/png');
-      state.originalDataUrl=dataUrl; state.originalImage=await imageFromDataUrl(dataUrl); state.modifiedImage=await imageFromDataUrl(dataUrl);
+      state.originalImage=await imageFromDataUrl(dataUrl); state.modifiedImage=await imageFromDataUrl(dataUrl);
       state.naturalW=1200; state.naturalH=675; state.appliedPatches.clear(); initializeWorkCanvasFromModifiedBase();
       state.regions=[];
       for(let i=0;i<10;i++) state.regions.push({id:uid(),xNorm:.06+(i%5)*.19,yNorm:.13+Math.floor(i/5)*.52,wNorm:.065,hNorm:.085,instruction:`Remove the small light rectangle ${i+1}.`,status:'pending',source:'diagnostic'});
@@ -470,8 +449,9 @@ Return valid JSON only: an array of objects containing integer xPx, yPx, wPx, hP
       expect('crop includes context and stays below full image size',geometry.cropW>geometry.targetW&&geometry.cropH>geometry.targetH&&geometry.cropW<1200&&geometry.cropH<675);
       expect('AI edit crop uses a square canvas',geometry.cropW===geometry.cropH);
       expect('materially reframed editor output is rejected',!editFrameMatches({naturalWidth:2109,naturalHeight:746},geometry));
-      const pixelCoordinates=suggestionCoordinates({xPx:120,yPx:135,wPx:60,hPx:54});
-      expect('pixel analysis coordinates normalize exactly',pixelCoordinates.every((value,index)=>Math.abs(value-[.1,.2,.05,.08][index])<.0001));
+      state.regions[1].instruction='';
+      const automaticPrompt=editPrompt(state.regions[1],cropGeometry(state.regions[1]),1);
+      expect('blank instructions ask ChatGPT to choose a localized edit',automaticPrompt.includes('Choose and perform one clear, playful, natural-looking change'));
       expect('edited center pixel is composited',center[0]>180&&center[1]<80);
       expect('pixel outside target remains unchanged',outside===before);
       expect('patch is tracked for deterministic recomposition',state.appliedPatches.has(first.id));
@@ -481,136 +461,24 @@ Return valid JSON only: an array of objects containing integer xPx, yPx, wPx, hP
     els.testLog.textContent=results.join('\n');
   }
 
-  function normalizeChangeType(item,instruction){
-    const supplied=String(item.changeType||item.type||'').toLowerCase().trim();
-    const colorOnly=/\b(?:recolor|change (?:the )?(?:color|colour)|change .{0,35} to (?:red|blue|green|yellow|orange|purple|pink|black|white|brown|gray|grey))\b/i.test(instruction)&&!/\b(?:add|attach|insert|replace|swap|substitute|remove|erase|delete)\b/i.test(instruction);
-    if(colorOnly)return 'color';
-    if(['add','replace','remove','color','detail'].includes(supplied))return supplied;
-    if(/\b(?:add|attach|insert|draw|give|put)\b/i.test(instruction))return 'add';
-    if(/\b(?:replace|swap|substitute|turn\s+.+\s+into)\b/i.test(instruction))return 'replace';
-    if(/\b(?:remove|erase|delete|take away)\b/i.test(instruction))return 'remove';
-    if(/\b(?:recolor|change (?:the )?(?:color|colour))\b/i.test(instruction))return 'color';
-    return 'detail';
-  }
-
-  function padSuggestedRegion(region){
-    const text=region.instruction.toLowerCase();
-    let left=.08,right=.08,top=.08,bottom=.08;
-    if(/\b(?:glasses|goggles|spectacles|eyewear)\b/.test(text)) left=right=.20,top=bottom=.14;
-    else if(/\b(?:hat|cap|crown|tiara)\b/.test(text)) left=right=.18,top=.30,bottom=.10;
-    else if(/\b(?:headband|hair clip|hair bow|bow clip)\b/.test(text)) left=right=.16,top=.24,bottom=.10;
-    else if(/\b(?:shirt|hoodie|sweater|collar|bow tie|wristband|sleeve|chest design|shirt graphic)\b/.test(text)) left=right=top=bottom=.12;
-    const x1=clamp(region.xNorm-region.wNorm*left,0,1);
-    const y1=clamp(region.yNorm-region.hNorm*top,0,1);
-    const x2=clamp(region.xNorm+region.wNorm*(1+right),0,1);
-    const y2=clamp(region.yNorm+region.hNorm*(1+bottom),0,1);
-    return {...region,xNorm:x1,yNorm:y1,wNorm:x2-x1,hNorm:y2-y1};
-  }
-
-  function suggestionCoordinates(item){
-    const pixelKeys=['xPx','yPx','wPx','hPx'];
-    if(pixelKeys.some(key=>item[key]!=null)){
-      const {width,height}=analysisImageDimensions();
-      const pixels=pixelKeys.map(key=>Number(item[key]));
-      return [pixels[0]/width,pixels[1]/height,pixels[2]/width,pixels[3]/height];
-    }
-    const values=[item.xNorm,item.yNorm,item.wNorm,item.hNorm].map(Number);
-    const largest=Math.max(...values);
-    const scale=largest>1?(largest<=100?100:1000):1;
-    return values.map(value=>value/scale);
-  }
-
-  function validateSuggestedRegions(raw,accepted=[]){
-    const items=Array.isArray(raw)?raw:Array.isArray(raw?.regions)?raw.regions:[];
-    const normalized=[...accepted],rejected=[];
-    for(const [index,item] of items.entries()){
-      const values=suggestionCoordinates(item);
-      const instruction=String(item.instruction||item.prompt||defaultInstruction());
-      const region={id:uid(),xNorm:values[0],yNorm:values[1],wNorm:values[2],hNorm:values[3],instruction,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
-      let reason='';
-      if(!values.every(Number.isFinite))reason='coordinates must all be numeric';
-      else if(region.wNorm<=.018)reason=`width ${region.wNorm.toFixed(4)} is not greater than 0.018`;
-      else if(region.hNorm<=.018)reason=`height ${region.hNorm.toFixed(4)} is not greater than 0.018`;
-      else if(region.xNorm<0||region.yNorm<0||region.xNorm+region.wNorm>1||region.yNorm+region.hNorm>1)reason='rectangle extends outside the image';
-      else if(region.wNorm>.22||region.hNorm>.22)reason='rectangle is too wide or tall for a localized difference';
-      else if(region.wNorm*region.hNorm>=.04)reason='rectangle covers 4% or more of the image';
-      else if(normalized.some(existing=>regionOverlap(existing,region)>.2))reason='rectangle overlaps an accepted suggestion by more than 20%';
-      else if(region.changeType==='color'&&normalized.filter(existing=>existing.changeType==='color').length>=2)reason='the set already contains the maximum of two color-only changes';
-      else if(/\b(?:tiny|ring|pin|magnet|hyphen|punctuation|single shoelace|one shoelace|watch face|isolated button)\b/i.test(region.instruction))reason='the proposed change is too small to find at normal viewing size';
-      else if(/\b(?:whole (?:arm|leg|body)|change (?:the )?pose|body position|(?:raise|lower) (?:the )?(?:arm|leg|hand)|raised (?:arm|leg|hand).{0,24}lowered|lowered (?:arm|leg|hand).{0,24}raised)\b/i.test(region.instruction))reason='the proposed change moves a limb or changes the person’s pose';
-      else if(normalized.length>=expectedCount())reason='more suggestions were returned than requested';
-      if(reason)rejected.push({number:index+1,reason,instruction:region.instruction});
-      else normalized.push(padSuggestedRegion(region));
-    }
-    return {accepted:normalized,rejected};
-  }
-
-  function repairAnalysisPrompt(missing,accepted,rejected){
-    const {width,height}=analysisImageDimensions();
-    const acceptedJson=accepted.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction})=>({xPx:Math.round(xNorm*width),yPx:Math.round(yNorm*height),wPx:Math.round(wNorm*width),hPx:Math.round(hNorm*height),changeType,instruction}));
-    const reasons=rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')||'The response did not contain enough usable regions.';
-    const colorSlots=Math.max(0,2-accepted.filter(region=>region.changeType==='color').length);
-    return `The attached image is exactly ${width} pixels wide by ${height} pixels high. Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only.
-
-Measure each replacement directly in image pixels; use image-analysis or pixel-inspection tools if helpful. Return integer xPx, yPx, wPx, and hPx, where xPx and yPx are the LEFT and TOP edges. Do not return normalized coordinates or percentages. The rectangle center must visibly intersect the feature named by its instruction, and the rectangle must cover all pixels needed for the edit. Hats include destination space above the head, glasses include both frames, shirt graphics include the complete graphic, and hand edits include the whole hand and fingers. Before answering, visually verify the placement and coverage of every rectangle.
-
-Favor substantial, playful additions and replacements to faces, hands, hair, clothing, or accessories. Never move a limb, change a pose, or create anything gross, offensive, sexual, injury-like, or grotesque. Do not propose minuscule details. At most ${colorSlots} replacements may be color-only. Include changeType as add, replace, remove, color, or detail. Identify targets by visible attributes that remain useful after cropping. Do not overlap accepted regions by more than 20% or repeat an accepted target. Accepted pixel rectangles to avoid: ${JSON.stringify(acceptedJson)}.`;
-  }
-
-  function requestMissingRegions(validation){
-    state.regions=validation.accepted;
-    const missing=expectedCount()-state.regions.length;
-    if(missing<=0)return false;
-    if(state.analysisRepairAttempts>=2)throw new Error(`Received ${expectedCount()} or more suggestions, but only ${state.regions.length} passed validation after two replacement attempts. ${validation.rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')}`);
-    state.analysisRepairAttempts++;
-    const details=validation.rejected.map(item=>`#${item.number} ${item.reason}`).join('; ');
-    setExtensionStatus('busy',`Accepted ${state.regions.length} of ${expectedCount()}; requesting ${missing} replacement${missing===1?'':'s'}…`);
-    els.aiRunStatus.textContent=`Rejected ${validation.rejected.length}: ${details}. Requesting ${missing} replacement${missing===1?'':'s'}…`;
-    setAiProgress(Math.max(state.aiProgressPercent,12));
-    updateRegionList(); draw();
-    postToExtension('SPOT_DIFF_REPAIR_ANALYSIS',{jobId:state.activeJobId,count:missing,prompt:repairAnalysisPrompt(missing,state.regions,validation.rejected)});
-    return true;
-  }
-
-  function regionOverlap(a,b){
-    const left=Math.max(a.xNorm,b.xNorm),top=Math.max(a.yNorm,b.yNorm);
-    const right=Math.min(a.xNorm+a.wNorm,b.xNorm+b.wNorm),bottom=Math.min(a.yNorm+a.hNorm,b.yNorm+b.hNorm);
-    const intersection=Math.max(0,right-left)*Math.max(0,bottom-top);
-    const union=a.wNorm*a.hNorm+b.wNorm*b.hNorm-intersection;
-    return union?intersection/union:0;
-  }
-
-  async function startAnalysis(){
-    if(!state.originalDataUrl||state.aiBusy)return;
-    state.aiBusy=true; state.activeJobId=uid('analysis');
-    state.workflowPhase='analysis';
-    state.analysisRepairAttempts=0;
-    setExtensionStatus('busy','ChatGPT is inspecting the image…');
-    setAiProgress(2);
-    els.aiRunStatus.textContent=`Step 1 of 2: choosing ${expectedCount()} differences in ChatGPT…`; updateControls();
-    postToExtension('SPOT_DIFF_ANALYZE',{jobId:state.activeJobId,imageDataUrl:analysisImageDataUrl(),count:expectedCount(),prompt:analysisPrompt()});
-  }
-
   function editPrompt(region,geometry,index){
     const left=Math.round(geometry.targetX/geometry.cropW*100),top=Math.round(geometry.targetY/geometry.cropH*100);
     const right=Math.round((geometry.targetX+geometry.targetW)/geometry.cropW*100),bottom=Math.round((geometry.targetY+geometry.targetH)/geometry.cropH*100);
     const centerX=Math.round((left+right)/2),centerY=Math.round((top+bottom)/2);
     const retry=state.editRetries.get(region.id)||0;
     const retryNote=retry?' A previous result changed the canvas framing, so preserving this exact square canvas is mandatory.':'';
-    return `Edit this square crop for a fun classroom spot-the-difference puzzle. The only editable subject is the feature intersecting the center point at approximately ${centerX}% across and ${centerY}% down, inside the target rectangle from ${left}%–${right}% across and ${top}%–${bottom}% down. The edit instruction was written while viewing the full photo: any words such as left, right, upper, lower, top, or bottom describe that full photo and must never override the target rectangle in this crop. If similar people or objects appear elsewhere, do not edit them. Requested change: ${region.instruction.trim()} Make the requested feature clearly visible without expanding the edit beyond the target. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact square canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe the image.${retryNote} Preserve lighting, texture, color profile, sharpness, and all unrelated details. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited square image only. This is edit ${index+1} of ${state.regions.length}.`;
+    const instruction=String(region.instruction||'').trim();
+    const requested=instruction
+      ?`Perform this requested change: ${instruction}`
+      :'Choose and perform one clear, playful, natural-looking change to the main visible feature intersecting the target center. Prefer a noticeable addition, replacement, or harmless removal over a subtle detail or color-only change. When the target contains a person, good choices include a face, hair, glasses, hat, clothing, or accessory change that fits completely inside the target. Do not change identity.';
+    return `Edit this square crop for a fun classroom spot-the-difference puzzle. The only editable subject is the feature intersecting the center point at approximately ${centerX}% across and ${centerY}% down, inside the target rectangle from ${left}%–${right}% across and ${top}%–${bottom}% down. The optional edit instruction was written while viewing the full photo: any words such as left, right, upper, lower, top, or bottom describe that full photo and must never override the target rectangle in this crop. If similar people or objects appear elsewhere, do not edit them. ${requested} Make the change clearly visible without expanding it beyond the target. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact square canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe the image.${retryNote} Preserve lighting, texture, color profile, sharpness, and all unrelated details. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited square image only. This is edit ${index+1} of ${state.regions.length}.`;
   }
 
   function startAiWorkflow(){
     if(state.aiBusy)return;
+    if(state.regions.length!==expectedCount()){ updateSelectionStatus(); return; }
     const pending=state.regions.filter(region=>region.status!=='done');
-    if(state.regions.length===expectedCount()&&pending.length)startEditQueue(pending);
-    else startAnalysis();
-  }
-
-  function startGeneration(){
-    if(state.aiBusy)return;
-    const pending=state.regions.filter(region=>region.status!=='done');
-    startEditQueue(pending);
+    if(pending.length)startEditQueue(pending);
   }
 
   function startEditQueue(regions){
@@ -629,7 +497,7 @@ Favor substantial, playful additions and replacements to faces, hands, hair, clo
     const regionId=state.editQueue[0];
     if(!regionId){
       clearJobTimer(); state.aiBusy=false; state.workflowPhase='complete'; setAiProgress(100); setExtensionStatus('connected','Edit queue complete');
-      els.aiRunStatus.textContent='Puzzle complete. Download both files in step 3.'; updateRegionList(); updateControls();
+      els.aiRunStatus.textContent='Puzzle complete. Download both files in step 4.'; updateRegionList(); updateControls();
       return;
     }
     const region=state.regions.find(item=>item.id===regionId);
@@ -637,7 +505,7 @@ Favor substantial, playful additions and replacements to faces, hands, hair, clo
     const crop=makeCrop(region);
     const edit={regionId:region.id,imageDataUrl:crop.dataUrl,prompt:editPrompt(region,crop.geometry,state.regions.indexOf(region))};
     region.status='editing';
-    els.aiRunStatus.textContent=`Step 2 of 2: creating difference ${state.editCompleted+1} of ${state.editTotal}…`;
+    els.aiRunStatus.textContent=`Creating difference ${state.editCompleted+1} of ${state.editTotal}…`;
     updateRegionList();
     armJobTimer(360000,`Edit ${state.editCompleted+1}`);
     postToExtension('SPOT_DIFF_EDIT_ONE',{jobId:state.activeJobId,edit});
@@ -672,37 +540,17 @@ Favor substantial, playful additions and replacements to faces, hands, hair, clo
     if(type==='SPOT_DIFF_EXTENSION_PONG'){
       state.extensionConnected=true; setExtensionStatus('connected','Ready'); updateControls();
     }
-    if(type==='SPOT_DIFF_ANALYSIS_RESULT'&&payload?.jobId===state.activeJobId){
-      try{
-        clearJobTimer();
-        const validation=validateSuggestedRegions(payload.regions,payload.repair?state.regions:[]);
-        if(requestMissingRegions(validation))return;
-        state.regions=validation.accepted.slice(0,expectedCount());
-        setAiProgress(Math.max(state.aiProgressPercent,14));
-        state.appliedPatches.clear(); state.aiBusy=false;
-        setExtensionStatus('connected',`${state.regions.length} differences selected`);
-        els.aiRunStatus.textContent='Differences selected. Starting image edits automatically…';
-        updateRegionList(); draw();
-        startEditQueue(state.regions.filter(region=>region.status!=='done'));
-      }catch(error){ failAi(error.message); }
-    }
     if(type==='SPOT_DIFF_AI_PROGRESS'&&payload?.jobId===state.activeJobId){
       els.aiRunStatus.textContent=payload.message||'ChatGPT is working…';
-      if(payload.kind==='edit'){
-        const region=state.regions.find(item=>item.id===payload.regionId);
-        if(region)region.status=payload.stage||'editing';
-        setAiProgress(Math.max(state.aiProgressPercent,editStageProgress(payload.stage)));
-        updateRegionList();
-      }else{
-        const analysisStage={uploading:4,attached:7,submitted:10}[payload.stage]??6;
-        setAiProgress(Math.max(state.aiProgressPercent,payload.kind==='analysis-repair'?12:analysisStage));
-      }
+      const region=state.regions.find(item=>item.id===payload.regionId);
+      if(region)region.status=payload.stage||'editing';
+      setAiProgress(Math.max(state.aiProgressPercent,editStageProgress(payload.stage)));
+      updateRegionList();
     }
     if(type==='SPOT_DIFF_EDIT_PROGRESS'&&payload?.jobId===state.activeJobId){
       const region=state.regions.find(item=>item.id===payload.regionId);
       if(region) region.status=payload.status||'editing';
-      if(state.workflowPhase==='analysis')setAiProgress(Math.max(state.aiProgressPercent,3));
-      else setAiProgress(Math.max(state.aiProgressPercent,editStageProgress(payload.status||'editing')));
+      setAiProgress(Math.max(state.aiProgressPercent,editStageProgress(payload.status||'editing')));
       els.aiRunStatus.textContent=payload.message||`Editing ${Math.min((payload.completed||0)+1,payload.total||1)} of ${payload.total||1}…`;
       updateRegionList();
     }
@@ -734,8 +582,7 @@ Favor substantial, playful additions and replacements to faces, hands, hair, clo
   els.manualTab.addEventListener('click',()=>setMode('manual'));
   els.aiTab.addEventListener('click',()=>setMode('ai'));
   els.checkExtensionBtn.addEventListener('click',pingExtension);
-  els.analyzeBtn.addEventListener('click',()=>state.aiBusy?cancelAi():startAiWorkflow());
-  els.generateBtn.addEventListener('click',startGeneration);
+  els.aiGenerateBtn.addEventListener('click',()=>state.aiBusy?cancelAi():startAiWorkflow());
   window.addEventListener('pagehide',()=>{
     if(state.aiBusy)postToExtension('SPOT_DIFF_CANCEL',{jobId:state.activeJobId});
   });
@@ -743,8 +590,12 @@ Favor substantial, playful additions and replacements to faces, hands, hair, clo
   els.origFile.addEventListener('change',async event=>{ try{ if(event.target.files[0])await loadManualImage(event.target.files[0],'original'); }catch(error){ alert(error.message); event.target.value=''; } });
   els.aiOrigFile.addEventListener('change',async event=>{ try{ if(event.target.files[0])await loadAiOriginal(event.target.files[0]); }catch(error){ alert(error.message); event.target.value=''; } });
   els.need.addEventListener('input',()=>{ updateRegionList(); draw(); });
-  els.clearBtn.addEventListener('click',()=>{ state.regions=[]; state.appliedPatches.clear(); initializeWorkCanvasFromModifiedBase(); updateRegionList(); draw(); });
-  els.undoBtn.addEventListener('click',()=>{ const region=state.regions.pop(); if(region)state.appliedPatches.delete(region.id); recomposeAllPatches(); updateRegionList(); draw(); });
+  function clearRegions(){ state.regions=[]; state.appliedPatches.clear(); initializeWorkCanvasFromModifiedBase(); updateSelectionStatus(); updateRegionList(); draw(); }
+  function undoLastRegion(){ const region=state.regions.pop(); if(region)state.appliedPatches.delete(region.id); recomposeAllPatches(); updateSelectionStatus(); updateRegionList(); draw(); }
+  els.clearBtn.addEventListener('click',clearRegions);
+  els.undoBtn.addEventListener('click',undoLastRegion);
+  els.aiClearBtn.addEventListener('click',clearRegions);
+  els.aiUndoBtn.addEventListener('click',undoLastRegion);
   els.exportBtn.addEventListener('click',downloadConfig);
   els.downloadImageBtn.addEventListener('click',downloadModified);
   els.downloadBothBtn.addEventListener('click',()=>{ downloadModified(); setTimeout(downloadConfig,250); });
@@ -769,13 +620,6 @@ Favor substantial, playful additions and replacements to faces, hands, hair, clo
     }catch(error){ alert(`Could not import config: ${error.message}`); }
     event.target.value='';
   });
-  els.patchUpload.addEventListener('change',async event=>{
-    const file=event.target.files[0],region=state.regions.find(item=>item.id===state.uploadRegionId); if(!file||!region)return;
-    try{ await applyPatch(region,await fileToDataUrl(file)); els.aiRunStatus.textContent=`Uploaded edit applied to region ${state.regions.indexOf(region)+1}.`; }
-    catch(error){ alert(error.message); }
-    event.target.value='';
-  });
-
   els.modCanvas.addEventListener('mousedown',beginDrag);
   els.modCanvas.addEventListener('mousemove',moveDrag);
   window.addEventListener('mouseup',endDrag);

@@ -47,7 +47,7 @@
     .canvas-wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px;align-content:start;min-width:0;overflow:auto}
     body.ai-simple .canvas-wrap{grid-template-columns:minmax(0,1100px);justify-content:center}
     body.ai-simple #origCard{display:none}
-    body.ai-simple canvas{cursor:default}
+    body.ai-simple canvas{cursor:crosshair}
     .card{background:var(--panel);border:1px solid #23263d;border-radius:14px;padding:12px;min-width:0}
     .frame{position:relative;background:#0a0d1b;border:3px solid var(--frame);border-radius:12px;overflow:hidden;aspect-ratio:4/3}
     canvas{width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
@@ -79,8 +79,10 @@
     .advanced>summary{cursor:pointer;color:var(--muted);font-size:12px;user-select:none}
     .advanced-body{padding-top:14px}
     .advanced[hidden]{display:none}
+    .selection-count{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:9px 0;color:var(--muted)}
+    .selection-count strong{color:var(--ink);font-size:15px}
     body.ai-simple #manualTools,body.ai-simple #manualRegions,body.ai-simple #manualExport{display:none}
-    body.ai-simple.advanced-open #manualRegions,body.ai-simple.advanced-open #manualExport{display:block}
+    body.ai-simple.advanced-open #manualRegions{display:block}
     .hidden-input{display:none}
     @media(max-width:1000px){main{grid-template-columns:350px minmax(0,1fr)}.canvas-wrap{grid-template-columns:1fr}}
   </style>
@@ -110,9 +112,21 @@
           <section id="generateStep" class="step">
             <span class="step-number">2</span>
             <div>
+              <h2>Mark 10 change areas</h2>
+              <p>Drag one box around each detail you want ChatGPT to change. Boxes are fixed once drawn; use Undo if the last one needs replacing.</p>
+              <div class="selection-count"><span>Areas marked</span><strong id="aiRegionCount">0 / 10</strong></div>
+              <div class="row">
+                <button id="aiUndoBtn" disabled>Undo last box</button>
+                <button id="aiClearBtn" class="danger" disabled>Clear all</button>
+              </div>
+            </div>
+          </section>
+          <section id="editStep" class="step">
+            <span class="step-number">3</span>
+            <div>
               <h2>Generate the puzzle</h2>
-              <p>ChatGPT will choose 10 differences and create them automatically. A ChatGPT tab will open while it works.</p>
-              <button id="analyzeBtn" class="primary" disabled>Upload a photo first</button>
+              <p>ChatGPT will edit each marked area automatically. Optional custom instructions are under Advanced options.</p>
+              <button id="aiGenerateBtn" class="primary" disabled>Upload a photo first</button>
               <div id="extensionStatus" class="status" role="status" aria-live="polite"><span class="status-dot"></span><span>Checking connection…</span></div>
               <button id="checkExtensionBtn" class="danger" style="margin-top:7px" hidden>Check connection</button>
               <div id="aiRunStatus" class="hint" role="status" aria-live="polite">Upload a photo to begin.</div>
@@ -120,7 +134,7 @@
             </div>
           </section>
           <section id="downloadStep" class="step">
-            <span class="step-number">3</span>
+            <span class="step-number">4</span>
             <div>
               <h2>Download the finished puzzle</h2>
               <p>Save the modified image and its matching player configuration.</p>
@@ -131,10 +145,7 @@
         <details id="aiAdvanced" class="advanced">
           <summary>Advanced options</summary>
           <div class="advanced-body">
-            <div class="section">
-              <button id="generateBtn" class="good" disabled>Generate pending edits</button>
-            </div>
-            <p class="hint">Opening this section also reveals region editing, individual file downloads, import tools, and diagnostics below.</p>
+            <p class="hint">Optionally describe the change for any numbered area below. Leave an instruction blank and ChatGPT will choose a clear, playful change that fits that area.</p>
           </div>
         </details>
       </section>
@@ -192,7 +203,7 @@
 
     <div class="canvas-wrap">
       <div id="modCard" class="card">
-        <span id="modBadge" class="badge">Modified — drag to mark a region</span>
+        <span id="modBadge" class="badge">Original photo — drag to mark 10 areas</span>
         <div class="frame" id="modFrame"><canvas id="modCanvas"></canvas></div>
       </div>
       <div id="origCard" class="card">
@@ -202,7 +213,6 @@
     </div>
   </main>
 
-  <input id="patchUpload" class="hidden-input" type="file" accept="image/*" />
-  <script src="creator.js?v=12"></script>
+  <script src="creator.js?v=13"></script>
 </body>
 </html>

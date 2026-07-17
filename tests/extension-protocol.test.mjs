@@ -79,15 +79,21 @@ test('message protocol names agree across creator and extension layers', () => {
   assert.ok(bridge.includes('SPOT_DIFF_BRIDGE_PING'));
   assert.ok(background.includes('SPOT_DIFF_BRIDGE_PING'));
   assert.ok(bridge.includes('try {\n      return Promise.resolve(chrome.runtime.sendMessage(message))'));
-  for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS', 'SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']) {
+  for (const type of ['SPOT_DIFF_EDIT_ONE', 'SPOT_DIFF_CANCEL']) {
     assert.ok(creator.includes(type), `creator missing ${type}`);
     assert.ok(bridge.includes(type), `bridge missing ${type}`);
     assert.ok(background.includes(type), `background missing ${type}`);
   }
+  for (const type of ['SPOT_DIFF_ANALYZE', 'SPOT_DIFF_REPAIR_ANALYSIS']) {
+    assert.ok(!creator.includes(type), `creator should no longer invoke ${type}`);
+    assert.ok(bridge.includes(type), `bridge missing legacy ${type} support`);
+    assert.ok(background.includes(type), `background missing legacy ${type} support`);
+  }
   assert.ok(bridge.includes('SPOT_DIFF_VERIFY_ANALYSIS'));
   assert.ok(background.includes('SPOT_DIFF_VERIFY_ANALYSIS'));
   assert.ok(!creator.includes('SPOT_DIFF_VERIFY_ANALYSIS'), 'Creator should not request a verification stage');
-  for (const type of ['SPOT_DIFF_ANALYSIS_RESULT', 'SPOT_DIFF_EDIT_RESULT', 'SPOT_DIFF_AI_PROGRESS', 'SPOT_DIFF_AI_ERROR', 'SPOT_DIFF_JOB_CANCELLED']) {
+  assert.ok(!creator.includes('SPOT_DIFF_ANALYSIS_RESULT'), 'Creator should not accept AI-selected coordinates');
+  for (const type of ['SPOT_DIFF_EDIT_RESULT', 'SPOT_DIFF_AI_PROGRESS', 'SPOT_DIFF_AI_ERROR', 'SPOT_DIFF_JOB_CANCELLED']) {
     assert.ok(creator.includes(type), `creator missing ${type}`);
     assert.ok(background.includes(type), `background missing ${type}`);
   }
@@ -136,31 +142,28 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(background.includes("runInFreshChat(message, job, temporary = true)"));
   assert.ok(background.includes("false\n    );"), 'edit jobs should opt out of temporary chat mode');
   assert.ok(!creator.includes("Do not use Adobe, Photoshop, Canva"));
-  assert.ok(creator.includes('requestMissingRegions(validation)'));
-  assert.ok(creator.includes('requesting ${missing} replacement'));
-  assert.ok(creator.includes('Measure every rectangle in actual pixels'));
-  assert.ok(creator.includes("const pixelKeys=['xPx','yPx','wPx','hPx']"));
-  assert.ok(creator.includes('pixel analysis coordinates normalize exactly'));
-  assert.ok(creator.includes('region.wNorm<=.018'));
-  assert.ok(creator.includes('region.wNorm>.22||region.hNorm>.22'));
-  assert.ok(creator.includes('region.wNorm*region.hNorm>=.04'));
-  assert.ok(creator.includes('the proposed change moves a limb or changes the person’s pose'));
-  assert.ok(creator.includes('Never move a whole limb'));
+  assert.ok(creator.includes("function expectedCount(){ return state.mode==='ai'?10"));
+  assert.ok(creator.includes("instruction:state.mode==='ai'?'':defaultInstruction()"));
+  assert.ok(creator.includes("if(state.regions.length!==expectedCount()){ updateSelectionStatus(); return; }"));
+  const workflow=creator.slice(creator.indexOf('function startAiWorkflow()'),creator.indexOf('function startEditQueue('));
+  assert.ok(!workflow.includes('startAnalysis()'), 'manual AI workflow must not ask ChatGPT to choose coordinates');
+  assert.ok(workflow.includes('startEditQueue(pending)'));
+  assert.ok(creator.includes("'Choose and perform one clear, playful, natural-looking change"));
+  assert.ok(creator.includes("const instruction=String(region.instruction||'').trim()"));
   assert.ok(creator.includes("Never move a whole limb, change a person's pose"));
-  assert.ok(creator.includes('the proposed change is too small to find at normal viewing size'));
-  assert.ok(creator.includes('at least 6 of 10'));
-  assert.ok(creator.includes("region.changeType==='color'"));
-  assert.ok(creator.includes('maximum of two color-only changes'));
-  assert.ok(creator.includes("startEditQueue(state.regions.filter(region=>region.status!=='done'))"));
   assert.ok(creator.includes("checkExtensionBtn.hidden=kind!=='error'"));
-  assert.ok(creator.includes('medium-impact playful additions and replacements'));
   assert.ok(creatorHtml.includes('Upload a photo'));
+  assert.ok(creatorHtml.includes('Mark 10 change areas'));
+  assert.ok(creatorHtml.includes('Boxes are fixed once drawn; use Undo'));
+  assert.ok(creatorHtml.includes('id="aiUndoBtn"'));
+  assert.ok(creatorHtml.includes('id="aiRegionCount">0 / 10'));
   assert.ok(creatorHtml.includes('Generate the puzzle'));
   assert.ok(creatorHtml.includes('Download the finished puzzle'));
   assert.ok(creatorHtml.includes('<summary>Advanced options</summary>'));
+  assert.ok(creatorHtml.includes('Leave an instruction blank and ChatGPT will choose'));
   assert.ok(creatorHtml.includes('id="aiProgressBar"'));
-  assert.ok(creator.includes("els.analyzeBtn.textContent='Cancel generation'"));
-  assert.ok(creator.includes("els.analyzeBtn.addEventListener('click',()=>state.aiBusy?cancelAi():startAiWorkflow())"));
+  assert.ok(creator.includes("els.aiGenerateBtn.textContent='Cancel generation'"));
+  assert.ok(creator.includes("els.aiGenerateBtn.addEventListener('click',()=>state.aiBusy?cancelAi():startAiWorkflow())"));
   assert.ok(creator.includes("if(type==='SPOT_DIFF_JOB_CANCELLED'"));
   assert.ok(creatorHtml.includes('id="aiProgressText">0%</span>'));
   assert.ok(creatorHtml.includes('body.ai-simple #origCard{display:none}'));
@@ -172,7 +175,8 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(!creator.includes('data-action="generate"'));
   assert.ok(!creator.includes('data-action="download"'));
   assert.ok(!creator.includes('data-action="upload"'));
-  assert.ok(creator.includes("if(state.mode==='ai'||!state.naturalW"));
+  assert.ok(creator.includes("if(!state.naturalW||state.regions.length>=expectedCount()"));
+  assert.ok(!creator.includes("if(state.mode==='ai'||!state.naturalW"));
   assert.ok(creator.includes('function editStageProgress(stage)'));
   assert.ok(creator.includes("setAiProgress(15+(state.editCompleted/state.editTotal)*85)"));
   assert.match(creatorHtml, /id="aiTab"[^>]*aria-selected="true"[^>]*>AI with ChatGPT<\/button>/);
@@ -183,21 +187,17 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(adapter.includes('SD_CHATGPT_REPAIR_ANALYSIS'));
   assert.ok(adapter.includes('SD_CHATGPT_VERIFY_ANALYSIS'));
   assert.ok(background.includes('runVerifyAnalysis(message.payload, sender.tab.id)'));
-  assert.ok(creator.includes('xPx and yPx are the LEFT and TOP pixel edges'));
-  assert.ok(creator.includes('The rectangle center must visibly intersect the exact feature'));
   assert.ok(!creator.includes('requestRegionVerification'));
   assert.ok(!creator.includes('analysisVerificationPasses'));
   assert.ok(creator.includes('drawGuide(els.modCanvas,region)'));
   assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe"));
-  assert.ok(creator.includes('function padSuggestedRegion(region)'));
   assert.ok(creator.includes("EDIT_FRAME_MISMATCH"));
   assert.ok(creator.includes('reframed difference ${state.regions.indexOf(region)+1}; retrying automatically'));
   assert.ok(creator.includes('const side=Math.min(maxSide'));
   assert.ok(creator.includes('cropW:side,cropH:side'));
   assert.ok(creator.includes('The only editable subject is the feature intersecting the center point'));
   assert.ok(creator.includes('must never override the target rectangle in this crop'));
-  assert.ok(creator.includes('not only by full-image phrases such as upper-right person'));
-  assert.ok(creatorHtml.includes('creator.js?v=12'));
+  assert.ok(creatorHtml.includes('creator.js?v=13'));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
   assert.ok(adapter.includes("unavailable|unable|cannot|can't|could not|not available"));
   assert.ok(adapter.includes("conversationTurn: ['[data-testid^=\"conversation-turn-\"]']"));
