@@ -413,7 +413,15 @@
 
   function analysisPrompt(){
     const {width,height}=analysisImageDimensions();
-    return `You are planning a fun classroom spot-the-difference puzzle. Inspect this clean, unmarked ${width} by ${height} image and choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently. Every finished difference must be findable at normal full-image viewing size without zooming. Aim for medium-impact but tightly localized changes: obvious once noticed, yet limited to one feature, accessory, or clothing detail. Never move a whole arm or leg, change a person's pose or body position, turn a raised limb into a lowered limb, or alter the global composition. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Favor substantial playful changes such as cleanly removing a whole mouth or eyebrow, removing one or two clearly visible fingers, changing a facial expression without changing identity, replacing glasses, adding or removing a hat, changing a collar, replacing a prominent shirt graphic, altering a hairstyle detail, or adding/removing a clearly visible clothing feature. These changes must feel playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like; show no wound, gore, distress, or damaged skin. Strongly favor additions and replacements: use them for at least 6 of every 10 suggestions. Use no more than 2 color-only changes in a set of 10. Do not choose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or other changes that would be hard to see at normal size. Avoid overlapping regions and image borders. Return valid JSON only as an array of objects with numeric xNorm, yNorm, wNorm, hNorm values from 0 to 1, a changeType value of add, replace, remove, color, or detail, and an instruction string describing one specific realistic change. Coordinate convention is mandatory: the origin 0,0 is the image's upper-left corner; xNorm is the rectangle's LEFT EDGE divided by image width; yNorm is the rectangle's TOP EDGE divided by image height; wNorm and hNorm are its width and height. xNorm and yNorm are never the center point. For example, a box spanning from 30% to 40% across and 20% to 28% down is xNorm 0.30, yNorm 0.20, wNorm 0.10, hNorm 0.08. The rectangle is the exact pixel-change mask, not a pointer identifying the person. For an addition, it must enclose the destination space the new object will occupy plus its attachment point. A cap or hat box must cover the crown/top of the head and space above it, not the face. A glasses box must cover the eyes, and a hand-gesture box must cover the hand and fingers. Use changeType color only when the main difference is merely recoloring something. Do not put quotation-mark characters inside instruction values; describe any visible text without quoting it. Every instruction must still identify the correct feature after it is cropped out of the full photo: describe visible clothing, hair, or object attributes and do not rely on full-image phrases such as upper-right person or leftmost student. Frame only the pixels that must change; the editor adds surrounding context separately. Every rectangle must have wNorm and hNorm greater than 0.018 and should normally be 0.025 to 0.12 in each dimension. Neither dimension may exceed 0.22, and the rectangle must use less than 4% of the image area. Before returning JSON, visually verify that every rectangle actually covers the pixels required by its instruction; replace any mismatched rectangle.`;
+    return `You are planning a fun classroom spot-the-difference puzzle from the attached clean, unmarked image. The image is exactly ${width} pixels wide by ${height} pixels high. Choose exactly ${expectedCount()} distinct, clearly noticeable details that can each be edited independently.
+
+LOCALIZATION IS THE HIGHEST PRIORITY. Do not estimate normalized decimals or percentages by eye. Measure every rectangle in actual pixels on the attached ${width} by ${height} image. Use any available image-analysis or pixel-inspection tools if helpful. For every suggestion return integer xPx, yPx, wPx, and hPx values: xPx and yPx are the LEFT and TOP pixel edges; wPx and hPx are pixel width and height. The origin 0,0 is the image's upper-left corner. The rectangle center must visibly intersect the exact feature named in the instruction. Before answering, inspect all rectangles again and replace any whose center or coverage does not match its instruction.
+
+Each rectangle is the exact pixel-change mask, not a pointer to a person. It must cover every pixel the requested edit could need. A hat or crown includes the top of the head and destination space above it; glasses include both lenses and frames; a bow tie includes the neckline; a shirt-graphic replacement includes the whole graphic; a hand edit includes the complete hand and fingers. Keep regions localized and non-overlapping, but never trade correct placement or complete coverage for a smaller box.
+
+Make every difference findable at normal full-image viewing size. Favor medium-impact playful additions and replacements; use additions or replacements for at least 6 of 10 and no more than 2 color-only changes. When people are visible, prioritize faces, hands, hair, clothes, and accessories for at least half the set. Good changes include harmlessly removing a mouth or eyebrow, changing an expression without changing identity, replacing glasses, adding a hat, changing a collar, replacing a prominent shirt graphic, or altering a hairstyle detail. Never move a whole limb, change a pose or body position, alter the global composition, or make anything gross, disturbing, insulting, sexual, offensive, injury-like, or grotesque. Do not choose tiny logos, punctuation, rings, pins, isolated buttons, single shoelaces, or minuscule marks.
+
+Return valid JSON only: an array of objects containing integer xPx, yPx, wPx, hPx, a changeType of add, replace, remove, color, or detail, and one specific instruction. Do not return xNorm/yNorm coordinates. Do not put quotation-mark characters inside instruction values. Describe each target by visible attributes that remain useful after cropping, not only by full-image phrases such as upper-right person or leftmost student.`;
   }
 
   function analysisImageDimensions(){
@@ -462,6 +470,8 @@
       expect('crop includes context and stays below full image size',geometry.cropW>geometry.targetW&&geometry.cropH>geometry.targetH&&geometry.cropW<1200&&geometry.cropH<675);
       expect('AI edit crop uses a square canvas',geometry.cropW===geometry.cropH);
       expect('materially reframed editor output is rejected',!editFrameMatches({naturalWidth:2109,naturalHeight:746},geometry));
+      const pixelCoordinates=suggestionCoordinates({xPx:120,yPx:135,wPx:60,hPx:54});
+      expect('pixel analysis coordinates normalize exactly',pixelCoordinates.every((value,index)=>Math.abs(value-[.1,.2,.05,.08][index])<.0001));
       expect('edited center pixel is composited',center[0]>180&&center[1]<80);
       expect('pixel outside target remains unchanged',outside===before);
       expect('patch is tracked for deterministic recomposition',state.appliedPatches.has(first.id));
@@ -497,15 +507,26 @@
     return {...region,xNorm:x1,yNorm:y1,wNorm:x2-x1,hNorm:y2-y1};
   }
 
+  function suggestionCoordinates(item){
+    const pixelKeys=['xPx','yPx','wPx','hPx'];
+    if(pixelKeys.some(key=>item[key]!=null)){
+      const {width,height}=analysisImageDimensions();
+      const pixels=pixelKeys.map(key=>Number(item[key]));
+      return [pixels[0]/width,pixels[1]/height,pixels[2]/width,pixels[3]/height];
+    }
+    const values=[item.xNorm,item.yNorm,item.wNorm,item.hNorm].map(Number);
+    const largest=Math.max(...values);
+    const scale=largest>1?(largest<=100?100:1000):1;
+    return values.map(value=>value/scale);
+  }
+
   function validateSuggestedRegions(raw,accepted=[]){
     const items=Array.isArray(raw)?raw:Array.isArray(raw?.regions)?raw.regions:[];
     const normalized=[...accepted],rejected=[];
     for(const [index,item] of items.entries()){
-      const values=[item.xNorm,item.yNorm,item.wNorm,item.hNorm].map(Number);
-      const largest=Math.max(...values);
-      const scale=largest>1?(largest<=100?100:1000):1;
+      const values=suggestionCoordinates(item);
       const instruction=String(item.instruction||item.prompt||defaultInstruction());
-      const region={id:uid(),xNorm:values[0]/scale,yNorm:values[1]/scale,wNorm:values[2]/scale,hNorm:values[3]/scale,instruction,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
+      const region={id:uid(),xNorm:values[0],yNorm:values[1],wNorm:values[2],hNorm:values[3],instruction,changeType:normalizeChangeType(item,instruction),status:'pending',source:'chatgpt'};
       let reason='';
       if(!values.every(Number.isFinite))reason='coordinates must all be numeric';
       else if(region.wNorm<=.018)reason=`width ${region.wNorm.toFixed(4)} is not greater than 0.018`;
@@ -525,10 +546,15 @@
   }
 
   function repairAnalysisPrompt(missing,accepted,rejected){
-    const acceptedJson=accepted.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction})=>({xNorm,yNorm,wNorm,hNorm,changeType,instruction}));
+    const {width,height}=analysisImageDimensions();
+    const acceptedJson=accepted.map(({xNorm,yNorm,wNorm,hNorm,changeType,instruction})=>({xPx:Math.round(xNorm*width),yPx:Math.round(yNorm*height),wPx:Math.round(wNorm*width),hPx:Math.round(hNorm*height),changeType,instruction}));
     const reasons=rejected.map(item=>`Suggestion ${item.number}: ${item.reason}`).join('; ')||'The response did not contain enough usable regions.';
     const colorSlots=Math.max(0,2-accepted.filter(region=>region.changeType==='color').length);
-    return `Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only. Each replacement must create a clearly visible but tightly localized difference. Favor substantial additions and replacements to a single facial feature, hand detail, hair detail, clothing detail, or accessory: for example remove a whole mouth or eyebrow, remove one or two clearly visible fingers, change an expression without changing identity, replace glasses, add/remove a hat, change a collar, replace a prominent shirt graphic, or alter a hairstyle detail. Never move a whole arm or leg, change a pose or body position, or turn a raised limb into a lowered limb. Keep it playful rather than gross, disturbing, insulting, sexual, offensive, or injury-like, with no wound, gore, distress, or damaged skin. Do not propose rings, pins, magnets, punctuation, single shoelaces, tiny logos, isolated buttons, minuscule marks, or mere color changes beyond the remaining allowance. At most ${colorSlots} of these replacements may be color-only. Include changeType as add, replace, remove, color, or detail; use color only for a mere recoloring. Coordinate convention is mandatory: origin is upper-left; xNorm is the LEFT EDGE and yNorm is the TOP EDGE, never the center; wNorm and hNorm are width and height. The rectangle is the exact pixel-change mask. For additions it must enclose the destination pixels plus the attachment point: hats/caps use the top of the head and space above, not the face; glasses use the eyes; gestures use the hand and fingers. Each replacement must identify a new detail that does not overlap any accepted rectangle by more than 20%. Every xNorm, yNorm, wNorm, and hNorm must be numeric from 0 to 1. Both wNorm and hNorm must be greater than 0.018; use 0.025 to 0.12 in each dimension when possible. Neither dimension may exceed 0.22, and each rectangle must cover less than 4% of the image. The instruction must identify the feature by attributes that remain visible in its crop, not only by a full-image location such as upper-right person or leftmost student. Frame only the pixels that must change because the editor adds context separately. Visually verify every replacement rectangle covers the area required by its instruction. Do not repeat any accepted target. Accepted regions to avoid: ${JSON.stringify(acceptedJson)}.`;
+    return `The attached image is exactly ${width} pixels wide by ${height} pixels high. Your previous response produced ${accepted.length} accepted regions and ${rejected.length} rejected regions. Rejection details: ${reasons}. Return exactly ${missing} replacement ${missing===1?'object':'objects'} as a JSON array only.
+
+Measure each replacement directly in image pixels; use image-analysis or pixel-inspection tools if helpful. Return integer xPx, yPx, wPx, and hPx, where xPx and yPx are the LEFT and TOP edges. Do not return normalized coordinates or percentages. The rectangle center must visibly intersect the feature named by its instruction, and the rectangle must cover all pixels needed for the edit. Hats include destination space above the head, glasses include both frames, shirt graphics include the complete graphic, and hand edits include the whole hand and fingers. Before answering, visually verify the placement and coverage of every rectangle.
+
+Favor substantial, playful additions and replacements to faces, hands, hair, clothing, or accessories. Never move a limb, change a pose, or create anything gross, offensive, sexual, injury-like, or grotesque. Do not propose minuscule details. At most ${colorSlots} replacements may be color-only. Include changeType as add, replace, remove, color, or detail. Identify targets by visible attributes that remain useful after cropping. Do not overlap accepted regions by more than 20% or repeat an accepted target. Accepted pixel rectangles to avoid: ${JSON.stringify(acceptedJson)}.`;
   }
 
   function requestMissingRegions(validation){
