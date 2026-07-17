@@ -186,7 +186,15 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(!creator.includes('requestRegionVerification'));
   assert.ok(!creator.includes('analysisVerificationPasses'));
   assert.ok(creator.includes('drawGuide(els.modCanvas,region)'));
-  assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, or reframe"));
+  assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe"));
+  assert.ok(creator.includes('function padSuggestedRegion(region)'));
+  assert.ok(creator.includes("EDIT_FRAME_MISMATCH"));
+  assert.ok(creator.includes('reframed difference ${state.regions.indexOf(region)+1}; retrying automatically'));
+  assert.ok(creator.includes('const side=Math.min(maxSide'));
+  assert.ok(creator.includes('cropW:side,cropH:side'));
+  assert.ok(creator.includes('The only editable subject is the feature intersecting the center point'));
+  assert.ok(creator.includes('must never override the target rectangle in this crop'));
+  assert.ok(creator.includes('do not rely on full-image phrases such as upper-right person'));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
   assert.ok(adapter.includes("unavailable|unable|cannot|can't|could not|not available"));
   assert.ok(adapter.includes("conversationTurn: ['[data-testid^=\"conversation-turn-\"]']"));
