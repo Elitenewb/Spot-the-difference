@@ -18,7 +18,7 @@
     mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null,
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, selectedRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, editRetries:new Map(), jobTimer:null, workflowPhase:'idle', aiProgressPercent:0
+    editQueue:[], editCompleted:0, editTotal:0, editRetries:new Map(), pendingEditSources:new Map(), jobTimer:null, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -52,7 +52,7 @@
     clearJobTimer();
     state.naturalW=0; state.naturalH=0; state.originalImage=null; state.modifiedImage=null;
     state.regions=[]; state.appliedPatches.clear(); state.workCanvas.width=0; state.workCanvas.height=0;
-    state.selectedRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[]; state.editRetries.clear();
+    state.selectedRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[]; state.editRetries.clear(); state.pendingEditSources.clear();
     for(const input of [els.modFile,els.origFile,els.aiOrigFile]) input.value='';
     updateRegionList(); fitCanvasSize();
   }
@@ -357,12 +357,50 @@
     return Math.abs(returnedRatio/expectedRatio-1)<=.025;
   }
 
+  async function editChangeFitsTarget(sourceDataUrl,image,geometry){
+    if(!sourceDataUrl)return true;
+    const source=await imageFromDataUrl(sourceDataUrl);
+    const size=64,sourceCanvas=document.createElement('canvas'),outputCanvas=document.createElement('canvas');
+    sourceCanvas.width=outputCanvas.width=size; sourceCanvas.height=outputCanvas.height=size;
+    sourceCanvas.getContext('2d').drawImage(source,0,0,size,size);
+    outputCanvas.getContext('2d').drawImage(image,0,0,size,size);
+    const before=sourceCanvas.getContext('2d').getImageData(0,0,size,size).data;
+    const after=outputCanvas.getContext('2d').getImageData(0,0,size,size).data;
+    const changed=[];
+    const threshold=34;
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+      const offset=(y*size+x)*4;
+      const difference=Math.abs(after[offset]-before[offset])+Math.abs(after[offset+1]-before[offset+1])+Math.abs(after[offset+2]-before[offset+2]);
+      changed.push(difference>=threshold);
+    }
+    const targetCell=(x,y)=>x/size*geometry.cropW>=geometry.targetX&&x/size*geometry.cropW<=geometry.targetX+geometry.targetW&&y/size*geometry.cropH>=geometry.targetY&&y/size*geometry.cropH<=geometry.targetY+geometry.targetH;
+    const safeCell=(x,y)=>x/size*geometry.cropW>=geometry.applyX&&x/size*geometry.cropW<=geometry.applyX+geometry.applyW&&y/size*geometry.cropH>=geometry.applyY&&y/size*geometry.cropH<=geometry.applyY+geometry.applyH;
+    const visited=new Set(),queue=[];
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(changed[y*size+x]&&targetCell(x,y)){const key=y*size+x;visited.add(key);queue.push(key);}
+    while(queue.length){
+      const key=queue.shift(),x=key%size,y=Math.floor(key/size);
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nx=x+dx,ny=y+dy,next=ny*size+nx;
+        if(nx>=0&&nx<size&&ny>=0&&ny<size&&changed[next]&&!visited.has(next)){visited.add(next);queue.push(next);}
+      }
+    }
+    const changedCount=changed.filter(Boolean).length;
+    if(!changedCount)return false;
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(changed[y*size+x]&&(!safeCell(x,y)||!visited.has(y*size+x)))return false;
+    return visited.size>0;
+  }
+
   async function applyPatch(region,dataUrl){
     const image=await imageFromDataUrl(dataUrl);
     const geometry=cropGeometry(region);
     if(!editFrameMatches(image,geometry)){
       const error=new Error(`ChatGPT reframed this edit (${image.naturalWidth}×${image.naturalHeight} instead of the crop's ${geometry.cropW}×${geometry.cropH} shape).`);
       error.code='EDIT_FRAME_MISMATCH';
+      throw error;
+    }
+    if(!(await editChangeFitsTarget(state.pendingEditSources.get(region.id),image,geometry))){
+      const error=new Error('ChatGPT changed pixels outside the selected area instead of making a localized difference.');
+      error.code='EDIT_OFF_TARGET';
       throw error;
     }
     state.appliedPatches.set(region.id,{dataUrl,geometry});
@@ -453,6 +491,11 @@
       const edited=document.createElement('canvas'); edited.width=geometry.cropW; edited.height=geometry.cropH;
       edited.getContext('2d').drawImage(await imageFromDataUrl(crop.dataUrl),0,0);
       edited.getContext('2d').fillStyle='#e22635'; edited.getContext('2d').fillRect(geometry.targetX,geometry.targetY-8,geometry.targetW,geometry.targetH+8);
+      const offTarget=document.createElement('canvas'); offTarget.width=geometry.cropW; offTarget.height=geometry.cropH;
+      offTarget.getContext('2d').drawImage(await imageFromDataUrl(crop.dataUrl),0,0);
+      offTarget.getContext('2d').fillStyle='#e22635'; offTarget.getContext('2d').fillRect(geometry.applyX+2,geometry.applyY+2,Math.max(4,Math.floor(geometry.targetW*.2)),Math.max(4,Math.floor(geometry.targetH*.2)));
+      const editedImage=await imageFromDataUrl(edited.toDataURL('image/png'));
+      const offTargetImage=await imageFromDataUrl(offTarget.toDataURL('image/png'));
       const before=source.getContext('2d').getImageData(0,0,1,1).data.join(',');
       await applyPatch(first,edited.toDataURL('image/png'));
       const centerX=geometry.cropX+geometry.targetX+Math.floor(geometry.targetW/2),centerY=geometry.cropY+geometry.targetY+Math.floor(geometry.targetH/2);
@@ -466,6 +509,8 @@
       expect('crop includes context and stays below full image size',geometry.cropW>geometry.targetW&&geometry.cropH>geometry.targetH&&geometry.cropW<1200&&geometry.cropH<675);
       expect('AI edit crop uses a square canvas',geometry.cropW===geometry.cropH);
       expect('composite area gives connected edits room beyond the drawn box',geometry.applyW>geometry.targetW&&geometry.applyH>geometry.targetH);
+      expect('connected edits overlap the selected target',await editChangeFitsTarget(crop.dataUrl,editedImage,geometry));
+      expect('disconnected off-target edits are rejected',!(await editChangeFitsTarget(crop.dataUrl,offTargetImage,geometry)));
       expect('materially reframed editor output is rejected',!editFrameMatches({naturalWidth:2109,naturalHeight:746},geometry));
       state.regions[1].instruction='';
       const automaticPrompt=editPrompt(state.regions[1],cropGeometry(state.regions[1]),1);
@@ -512,6 +557,7 @@
     els.aiRunStatus.textContent=`Preparing ${regions.length} crop edit${regions.length===1?'':'s'}…`;
     state.editQueue=regions.map(region=>{region.status='queued';return region.id;});
     state.editRetries.clear();
+    state.pendingEditSources.clear();
     state.editCompleted=0; state.editTotal=state.editQueue.length;
     updateRegionList(); updateControls();
     sendNextEdit();
@@ -527,6 +573,7 @@
     const region=state.regions.find(item=>item.id===regionId);
     if(!region){state.editQueue.shift();sendNextEdit();return;}
     const crop=makeCrop(region);
+    state.pendingEditSources.set(region.id,crop.dataUrl);
     const edit={regionId:region.id,imageDataUrl:crop.dataUrl,prompt:editPrompt(region,crop.geometry,state.regions.indexOf(region))};
     region.status='editing';
     els.aiRunStatus.textContent=`Creating difference ${state.editCompleted+1} of ${state.editTotal}…`;
@@ -588,10 +635,12 @@
           sendNextEdit();
         }catch(error){
           const retries=state.editRetries.get(region.id)||0;
-          if(error.code==='EDIT_FRAME_MISMATCH'&&retries<2){
+          if((error.code==='EDIT_FRAME_MISMATCH'||error.code==='EDIT_OFF_TARGET')&&retries<2){
             state.editRetries.set(region.id,retries+1);
             region.status='queued';
-            els.aiRunStatus.textContent=`ChatGPT reframed difference ${state.regions.indexOf(region)+1}; retrying automatically…`;
+            els.aiRunStatus.textContent=error.code==='EDIT_OFF_TARGET'
+              ?`ChatGPT changed outside difference ${state.regions.indexOf(region)+1}; retrying automatically…`
+              :`ChatGPT reframed difference ${state.regions.indexOf(region)+1}; retrying automatically…`;
             updateRegionList(); sendNextEdit();
           }else{
             region.status='error'; failAi(error.message);

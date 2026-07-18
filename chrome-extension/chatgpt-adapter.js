@@ -258,35 +258,40 @@
   }
 
   async function waitForEditedImage(beforeUrls, beforeCount, payload) {
-    let openedCard = false;
     let responseStart = beforeCount;
     let refusalFollowupSent = false;
+    let transientLabelSince = 0;
     let result;
     while (!result?.image) {
       result = await waitFor(() => {
         const messages = assistantMessages();
         const responseMessages = messages.slice(responseStart);
         const last = responseMessages[responseMessages.length - 1] || messages[messages.length - 1];
-        const generatedImage = responseMessages
-          .flatMap(message => [...message.querySelectorAll(SELECTORS.generatedCard.join(','))])
-          .find(image => !beforeUrls.has(image.currentSrc || image.src));
-        const card = generatedImage?.closest('[role="button"]');
-        if (card && !openedCard) {
-          openedCard = true;
-          reportProgress(payload, 'opening', 'Opening ChatGPT’s generated image…');
-          card.click();
-          return null;
-        }
         const scopedImages = responseMessages.flatMap(message => [...message.querySelectorAll('img')]);
-        const viewerImages = allMatches(SELECTORS.viewerImage);
-        const images = [...new Set([...scopedImages, ...viewerImages])].filter(image => {
+        const generatedImages = allMatches(SELECTORS.generatedImage).filter(isVisible);
+        const newGeneratedImages = generatedImages.filter(image => !beforeUrls.has(image.currentSrc || image.src));
+        const viewerImages = allMatches(SELECTORS.viewerImage).filter(isVisible);
+        const images = [...new Set([...generatedImages, ...viewerImages, ...scopedImages.filter(isVisible)])].filter(image => {
           const source = image.currentSrc || image.src;
           return source && !beforeUrls.has(source) && image.naturalWidth >= 256 && image.naturalHeight >= 256;
         });
-        if (images.length) return { image: images[images.length - 1] };
+        // Wait for the generation indicator to clear before capturing an image.
+        // ChatGPT can replace a progressive render with a different final image.
+        if (images.length && !firstMatch(SELECTORS.stop)) {
+          reportProgress(payload, 'opening', 'Reading ChatGPT’s finished image…');
+          return { image: images[0] };
+        }
         if (messages.length > responseStart && !firstMatch(SELECTORS.stop)) {
           const text = (last.innerText || last.textContent || '').trim();
-          if (text) return { error: text.slice(0, 500) };
+          // ChatGPT can add a short assistant label such as “Edit” before the
+          // generated image element has loaded. Treat that as in-progress, not
+          // as a refusal, so the recovery prompt is never typed into a busy composer.
+          const transientAssistantLabel = /^(edit|edited|image edit)$/i.test(text.replace(/\s+/g, ' ').trim());
+          if (transientAssistantLabel && !newGeneratedImages.length) {
+            if (!transientLabelSince) transientLabelSince = Date.now();
+            if (Date.now() - transientLabelSince < 15000) return null;
+          }
+          if (text && !newGeneratedImages.length) return { error: text.slice(0, 500) };
         }
         return null;
       }, 300000, 'ChatGPT did not return a retrievable edited image within five minutes.');
@@ -297,7 +302,6 @@
       const followupBefore = assistantMessages().length;
       await submitPrompt(SAFE_EDIT_FOLLOWUP, payload, followupBefore);
       responseStart = followupBefore;
-      openedCard = false;
       result = null;
     }
     await waitFor(() => !firstMatch(SELECTORS.stop), 120000, 'ChatGPT’s image generation did not finish.').catch(() => true);
