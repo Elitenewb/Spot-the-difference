@@ -236,7 +236,7 @@
     // State
     let modBmp = null;
     let origBmp = null;
-    let cfg = null; // {regions[{xNorm,yNorm,wNorm,hNorm}], need, natural{w,h}}
+    let cfg = null; // {regions[{xNorm,yNorm,wNorm,hNorm,reveal?}], need, natural{w,h}}
     let found = new Set();
     let score = 0;
     let gameActive = false;
@@ -284,7 +284,8 @@
     function parseConfig(raw){
       const parsed = raw.version >= 3 && Array.isArray(raw.regions) ? raw : raw.points ? migrateV2toV3(raw) : null;
       if (!parsed) throw new Error('Config must contain regions');
-      const valid = parsed.regions.length > 0 && parsed.regions.every(region => ['xNorm','yNorm','wNorm','hNorm'].every(key => Number.isFinite(region[key])) && region.wNorm > 0 && region.hNorm > 0 && region.xNorm >= 0 && region.yNorm >= 0 && region.xNorm + region.wNorm <= 1 && region.yNorm + region.hNorm <= 1);
+      const validRect = region => ['xNorm','yNorm','wNorm','hNorm'].every(key => Number.isFinite(region[key])) && region.wNorm > 0 && region.hNorm > 0 && region.xNorm >= 0 && region.yNorm >= 0 && region.xNorm + region.wNorm <= 1.000001 && region.yNorm + region.hNorm <= 1.000001;
+      const valid = parsed.regions.length > 0 && parsed.regions.every(region => validRect(region) && (!region.reveal || validRect(region.reveal)));
       if (!valid) throw new Error('Config contains invalid or out-of-bounds regions');
       parsed.need = Math.min(parsed.regions.length, Math.max(1, Number(parsed.need) || parsed.regions.length));
       return parsed;
@@ -387,6 +388,10 @@
       };
     }
 
+    function revealToCss(region){
+      return regionToCss(region.reveal || region);
+    }
+
     function drawLeftLayers(){
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       octx.setTransform(1,0,0,1,0,0);
@@ -428,13 +433,13 @@
     function replayHoles(){
       if (!cfg) return;
       for (const idx of found){
-        const b = regionToCss(cfg.regions[idx]);
+        const b = revealToCss(cfg.regions[idx]);
         eraseRect(b.x, b.y, b.w, b.h);
       }
     }
 
     function animateErase(idx, done){
-      const b = regionToCss(cfg.regions[idx]);
+      const b = revealToCss(cfg.regions[idx]);
       const cx = b.x + b.w/2, cy = b.y + b.h/2;
       let i=0, steps=12;
       const step = ()=>{
@@ -699,6 +704,12 @@
       expect('regionToCss y', approx(b.y, 0.70*800), `got ${b.y}`);
       expect('regionToCss w', approx(b.w, 0.10*1200), `got ${b.w}`);
       expect('regionToCss h', approx(b.h, 0.10*800), `got ${b.h}`);
+
+      const revealRegion = {xNorm:0.20,yNorm:0.70,wNorm:0.10,hNorm:0.10,reveal:{xNorm:0.15,yNorm:0.65,wNorm:0.20,hNorm:0.20}};
+      const rb = revealToCss(revealRegion);
+      expect('revealToCss uses the full composited patch', approx(rb.x,0.15*1200) && approx(rb.y,0.65*800) && approx(rb.w,0.20*1200) && approx(rb.h,0.20*800));
+      const legacyRb = revealToCss(cfg.regions[0]);
+      expect('revealToCss falls back to the clickable region', approx(legacyRb.x,b.x) && approx(legacyRb.y,b.y) && approx(legacyRb.w,b.w) && approx(legacyRb.h,b.h));
 
       // hit test: inside region
       const insideX = b.x + b.w/2, insideY = b.y + b.h/2;

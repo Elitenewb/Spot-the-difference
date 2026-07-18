@@ -419,8 +419,27 @@
     state.workCanvas.getContext('2d').drawImage(patch,geometry.cropX+applyX,geometry.cropY+applyY);
   }
 
+  function revealBounds(region){
+    const saved=state.appliedPatches.get(region.id);
+    if(!saved?.geometry)return null;
+    const geometry=saved.geometry;
+    const applyX=geometry.applyX??geometry.targetX,applyY=geometry.applyY??geometry.targetY;
+    const applyW=geometry.applyW??geometry.targetW,applyH=geometry.applyH??geometry.targetH;
+    return {
+      xNorm:(geometry.cropX+applyX)/state.naturalW,
+      yNorm:(geometry.cropY+applyY)/state.naturalH,
+      wNorm:applyW/state.naturalW,
+      hNorm:applyH/state.naturalH
+    };
+  }
+
   function configJson(){
-    return JSON.stringify({version:3,natural:{w:state.naturalW,h:state.naturalH},regions:state.regions.map(({xNorm,yNorm,wNorm,hNorm})=>({xNorm,yNorm,wNorm,hNorm})),need:expectedCount()},null,2);
+    const regions=state.regions.map(region=>{
+      const {xNorm,yNorm,wNorm,hNorm}=region;
+      const reveal=revealBounds(region);
+      return reveal?{xNorm,yNorm,wNorm,hNorm,reveal}:{xNorm,yNorm,wNorm,hNorm};
+    });
+    return JSON.stringify({version:3,natural:{w:state.naturalW,h:state.naturalH},regions,need:expectedCount()},null,2);
   }
   function downloadConfig(){ downloadBlob(new Blob([configJson()],{type:'application/json'}),'spot-config.json'); }
   function downloadModified(){ downloadDataUrl(state.workCanvas.toDataURL('image/png'),'spot-modified.png'); }

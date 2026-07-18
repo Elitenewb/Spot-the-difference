@@ -102,6 +102,7 @@ test('message protocol names agree across creator and extension layers', () => {
 test('creator and adapter include recovery guards for stalled website automation', () => {
   const creator = fs.readFileSync(new URL('../creator.js', import.meta.url), 'utf8');
   const creatorHtml = fs.readFileSync(new URL('../creator.html', import.meta.url), 'utf8');
+  const player = fs.readFileSync(new URL('../player.html', import.meta.url), 'utf8');
   const adapter = fs.readFileSync(new URL('../chrome-extension/chatgpt-adapter.js', import.meta.url), 'utf8');
   const background = fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8');
   assert.ok(!creator.includes('armJobTimer(240000'));
@@ -212,6 +213,11 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('const side=Math.min(maxSide'));
   assert.ok(creator.includes('cropW:side,cropH:side'));
   assert.ok(creator.includes('applyW:applyRight-applyX'));
+  assert.ok(creator.includes('function revealBounds(region)'));
+  assert.ok(creator.includes('return reveal?{xNorm,yNorm,wNorm,hNorm,reveal}'));
+  assert.ok(player.includes('function revealToCss(region)'));
+  assert.ok(player.includes('return regionToCss(region.reveal || region)'));
+  assert.ok(player.includes('const b = revealToCss(cfg.regions[idx])'));
   assert.ok(creator.includes('The only editable subject is the feature intersecting the center point'));
   assert.ok(creator.includes('Directional words such as left, right, upper, lower, top, or bottom refer to the original full image'));
   assert.ok(creator.includes('must never override the target rectangle in this crop'));

@@ -23,7 +23,7 @@ A dependency-free browser game for creating and playing custom spot-the-differen
 
 After changing any file in `chrome-extension/`, select **Reload** on the extension card in `chrome://extensions` before testing again. The creator reports attachment, submission, and response-wait stages; if a request stalls, inspect the visible temporary ChatGPT tab and retry after the creator watchdog resets it.
 
-The full image is uploaded to ChatGPT only for region analysis, which uses a temporary chat. Because ChatGPT image editing is unavailable in Temporary Chat, each image-editing request uses a fresh regular chat containing only one padded crop; these edit chats can appear in ChatGPT history. Returned crops are resized to their original crop geometry, clipped to a modest safe area around the selected rectangle, feathered at the edges, and composited on a canvas with the original image dimensions. The extra compositing room lets a connected feature such as a hat finish naturally across the edge of the puzzle's clickable rectangle.
+The full image is uploaded to ChatGPT only for region analysis, which uses a temporary chat. Because ChatGPT image editing is unavailable in Temporary Chat, each image-editing request uses a fresh regular chat containing only one padded crop; these edit chats can appear in ChatGPT history. Returned crops are resized to their original crop geometry, clipped to a modest safe area around the selected rectangle, feathered at the edges, and composited on a canvas with the original image dimensions. The extra compositing room lets a connected feature such as a hat finish naturally across the edge of the puzzle's clickable rectangle. The exported config stores that larger composited area separately, so finding a difference reveals the original beneath the entire generated patch while the user-drawn rectangle remains the click target.
 
 Region suggestions are validated before they enter the creator. If ChatGPT returns an undersized, out-of-bounds, oversized, or substantially overlapping rectangle, the creator keeps every valid suggestion and asks for only the missing replacements in the same analysis chat. The rejection reasons and accepted rectangles are included so the replacements can correct the validation issue without duplicating existing targets.
 
@@ -64,7 +64,7 @@ npm test
 
 ## Current config format
 
-Creator exports version 3 JSON containing the source image dimensions, number of required finds, and normalized rectangle regions. The player also migrates older version 2 circle-based configs when loaded.
+Creator exports version 3 JSON containing the source image dimensions, number of required finds, normalized clickable rectangle regions, and—when an AI patch extends beyond a clickable rectangle—separate normalized reveal bounds. The player also accepts version 3 configs without reveal bounds and migrates older version 2 circle-based configs when loaded.
 
 ## Privacy and limitations
 
