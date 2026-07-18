@@ -110,7 +110,9 @@ test('analysis accepts complete JSON while ChatGPT still exposes a Stop control'
   assert.equal(probed.length, 10);
 });
 
-test('a generated-image placeholder is not mistaken for refusal and returns while Stop answering remains visible', async () => {
+test('a generated image is returned only after the completed turn loses its Stop control', async () => {
+  let pollCount = 0;
+  let responseSettled = false;
   const generatedImage = {
     src: 'https://example.test/generated.png',
     currentSrc: 'https://example.test/generated.png',
@@ -132,12 +134,14 @@ test('a generated-image placeholder is not mistaken for refusal and returns whil
     }
   };
   const stopNode = { getClientRects() { return [{}]; } };
+  const composer = { innerText: '', textContent: '', value: '' };
   const documentMock = {
     documentElement: {},
     addEventListener() {},
     removeEventListener() {},
     querySelector(selector) {
-      if (selector.includes('stop-button') || selector.includes('Stop answering')) return stopNode;
+      if ((selector.includes('stop-button') || selector.includes('Stop answering')) && !responseSettled) return stopNode;
+      if (selector === '#prompt-textarea') return composer;
       if (selector === '[data-message-author-role="assistant"]') return message;
       return null;
     },
@@ -145,6 +149,7 @@ test('a generated-image placeholder is not mistaken for refusal and returns whil
       if (selector === '[data-message-author-role="assistant"]') return [message];
       if (selector === '[data-testid^="conversation-turn-"]') return [message];
       if (selector === 'img[alt^="Generated image:"]') return [generatedImage];
+      if ((selector.includes('stop-button') || selector.includes('Stop answering')) && !responseSettled) return [stopNode];
       return [];
     }
   };
@@ -157,8 +162,12 @@ test('a generated-image placeholder is not mistaken for refusal and returns whil
     chrome: { runtime: { onMessage: { addListener() {} }, sendMessage: async () => {} } },
     setTimeout(callback, delay) {
       if (delay === 350) {
-        generatedImage.naturalWidth = 1254;
-        generatedImage.naturalHeight = 1254;
+        pollCount++;
+        if (pollCount === 1) {
+          generatedImage.naturalWidth = 1254;
+          generatedImage.naturalHeight = 1254;
+        }
+        if (pollCount === 2) responseSettled = true;
       }
       callback();
       return 1;
@@ -173,6 +182,7 @@ test('a generated-image placeholder is not mistaken for refusal and returns whil
 
   const result = await context.__spotDiffAdapterTest.waitForEditedImage(new Set(), 0, {});
   assert.equal(result.imageUrl, generatedImage.src);
+  assert.equal(pollCount, 2, 'a loaded image alone must not finish while Stop remains visible');
 });
 
 test('prompt submission is not inferred from an unrelated assistant update', async () => {

@@ -16,7 +16,8 @@
     conversationTurn: ['[data-testid^="conversation-turn-"]'],
     generatedImage: ['img[alt^="Generated image:"]'],
     viewerImage: ['[role="dialog"] img'],
-    responseComplete: ['button[data-testid="copy-turn-action-button"]']
+    responseComplete: ['button[data-testid="copy-turn-action-button"]'],
+    stop: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop generating"]', 'button[aria-label*="Stop answering"]']
   };
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -24,6 +25,14 @@
   const firstMatch = selectors => selectors.map(selector => document.querySelector(selector)).find(Boolean) || null;
   const allMatches = selectors => [...new Set(selectors.flatMap(selector => [...document.querySelectorAll(selector)]))];
   const isVisible = element => !!element && element.getClientRects().length > 0;
+
+  function composerIsEmpty() {
+    const composer = firstMatch(SELECTORS.composer);
+    const text = composer?.innerText || composer?.textContent || composer?.value || '';
+    return !text.trim();
+  }
+
+  const responseInProgress = () => allMatches(SELECTORS.stop).some(isVisible);
 
   function reportProgress(payload, stage, message) {
     if (!payload?.jobId) return;
@@ -273,9 +282,12 @@
           return source && !beforeUrls.has(source);
         });
         const images = newImages.filter(image => image.naturalWidth >= 256 && image.naturalHeight >= 256);
-        // A loaded Generated image element is the usable-result boundary.
-        // ChatGPT can leave “Stop answering” visible after this point.
-        if (images.length) {
+        // The image can finish loading before ChatGPT finishes the turn. Keep
+        // this chat alive until the empty composer gets its Send control back;
+        // navigating away sooner can discard a valid image during finalization.
+        const responseComplete = SELECTORS.responseComplete.some(selector => last?.querySelector(selector));
+        const responseSettled = composerIsEmpty() && responseComplete && !responseInProgress();
+        if (images.length && responseSettled) {
           reportProgress(payload, 'opening', 'Reading ChatGPT’s finished image…');
           return { image: images[images.length - 1] };
         }
@@ -284,8 +296,7 @@
           // Completed assistant turns expose response actions. Transitional
           // labels such as “Thinking” and “Edit” do not, so they cannot trigger
           // refusal recovery while an image is still loading.
-          const responseComplete = SELECTORS.responseComplete.some(selector => last?.querySelector(selector));
-          if (text && responseComplete && !newImages.length) return { error: text.slice(0, 500) };
+          if (text && responseComplete && responseSettled && !newImages.length) return { error: text.slice(0, 500) };
         }
         return null;
       }, 300000, 'ChatGPT did not return a retrievable edited image within five minutes.');
@@ -298,7 +309,6 @@
       responseStart = followupBefore;
       result = null;
     }
-    await sleep(1200);
     const source = result.image.currentSrc || result.image.src;
     if (source.startsWith('data:')) return { imageDataUrl: source };
     if (source.startsWith('blob:')) {
