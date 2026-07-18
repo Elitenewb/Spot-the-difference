@@ -18,12 +18,12 @@ A dependency-free browser game for creating and playing custom spot-the-differen
 3. Serve this repository over localhost, open `creator.html`, and select **AI with ChatGPT**.
 4. Upload one original image and select **Suggest regions**.
 5. Review all ten rectangles and edit instructions. You can remove, redraw, download, or manually replace any crop.
-6. Select **Generate pending edits**. The extension opens a dedicated ChatGPT tab and processes one padded crop in a fresh regular conversation at a time. When ChatGPT returns an image card, the extension opens its full-size viewer and reads the resulting asset back into the creator.
+6. Select **Generate pending edits**. The extension opens a dedicated ChatGPT tab and processes only the exact pixels inside each selected rectangle in a fresh regular conversation. When ChatGPT returns an image card, the extension opens its full-size viewer and reads the resulting asset back into the creator.
 7. Inspect the composited modified image, then download the modified PNG and config JSON.
 
 After changing any file in `chrome-extension/`, select **Reload** on the extension card in `chrome://extensions` before testing again. The creator reports attachment, submission, and response-wait stages; if a request stalls, inspect the visible temporary ChatGPT tab and retry after the creator watchdog resets it.
 
-The full image is uploaded to ChatGPT only for region analysis, which uses a temporary chat. Because ChatGPT image editing is unavailable in Temporary Chat, each image-editing request uses a fresh regular chat containing only one padded square crop; these edit chats can appear in ChatGPT history. Returned crops are resized to their original crop geometry, but only the exact user-drawn rectangle is feathered and composited on the full-size image. The padding supplies edit context only—it is never pasted into the puzzle.
+The full image is uploaded to ChatGPT only for region analysis, which uses a temporary chat. Because ChatGPT image editing is unavailable in Temporary Chat, each image-editing request uses a fresh regular chat containing only the exact user-drawn rectangle; no surrounding context is uploaded with that edit. Returned edits are fitted back into that same rectangle, feathered at its inside edges, and composited on the full-size image.
 
 Region suggestions are validated before they enter the creator. If ChatGPT returns an undersized, out-of-bounds, oversized, or substantially overlapping rectangle, the creator keeps every valid suggestion and asks for only the missing replacements in the same analysis chat. The rejection reasons and accepted rectangles are included so the replacements can correct the validation issue without duplicating existing targets.
 
