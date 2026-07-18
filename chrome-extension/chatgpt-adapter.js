@@ -168,7 +168,7 @@
     element.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
   }
 
-  async function submitPrompt(prompt, payload) {
+  async function submitPrompt(prompt, payload, beforeAssistantCount = null) {
     const composer = await waitFor(() => firstMatch(SELECTORS.composer), 30000, 'ChatGPT’s composer was not found. Sign in, then try again.');
     setComposerText(composer, prompt);
     const send = await waitFor(() => {
@@ -177,10 +177,22 @@
     }, 45000, 'ChatGPT’s Send button did not become available after the image was attached.');
     send.click();
     reportProgress(payload, 'submitted', 'Prompt sent. Waiting for ChatGPT’s response…');
-    await waitFor(() => {
-      const text = composer.innerText || composer.textContent || composer.value || '';
-      return !text.trim();
-    }, 12000, 'ChatGPT did not submit the prompt. Open the ChatGPT tab, confirm the attachment finished uploading, then retry.');
+    let accepted = true;
+    try {
+      await waitFor(() => {
+        const text = composer.innerText || composer.textContent || composer.value || '';
+        if (!text.trim()) return true;
+        if (Number.isInteger(beforeAssistantCount) && assistantMessages().length > beforeAssistantCount) return true;
+        return responseInProgress();
+      }, 60000, 'ChatGPT did not acknowledge the prompt.');
+    } catch (_) {
+      // The click may have been accepted even when ChatGPT delays clearing its
+      // composer and exposes no reliable in-progress control. Continue into
+      // the response watcher instead of discarding a valid later image.
+      accepted = false;
+    }
+    if (!accepted) reportProgress(payload, 'submitted', 'Prompt click sent; waiting for ChatGPT’s response…');
+    return accepted;
   }
 
   function assistantMessages() {
@@ -305,7 +317,7 @@
       refusalFollowupSent = true;
       reportProgress(payload, 'submitted', 'ChatGPT returned text instead of an image; requesting an acceptable alternative…');
       const followupBefore = assistantMessages().length;
-      await submitPrompt(SAFE_EDIT_FOLLOWUP, payload);
+      await submitPrompt(SAFE_EDIT_FOLLOWUP, payload, followupBefore);
       responseStart = followupBefore;
       result = null;
     }
@@ -326,9 +338,10 @@
 
   async function runAnalysis(payload) {
     const beforeSignatures = regionResponseSignatures();
+    const beforeAssistantCount = assistantMessages().length;
     reportProgress(payload, 'uploading', 'Uploading the analysis image to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-original.jpg', payload);
-    await submitPrompt(payload.prompt, payload);
+    await submitPrompt(payload.prompt, payload, beforeAssistantCount);
     const regions = await waitForAnalysis(beforeSignatures);
     reportProgress(payload, 'parsed', `Parsed ${regions.length} region suggestions from ChatGPT.`);
     return regions;
@@ -336,16 +349,18 @@
 
   async function runRepairAnalysis(payload) {
     const beforeSignatures = regionResponseSignatures();
+    const beforeAssistantCount = assistantMessages().length;
     reportProgress(payload, 'submitted', 'Requesting replacement suggestions from ChatGPT…');
-    await submitPrompt(payload.prompt, payload);
+    await submitPrompt(payload.prompt, payload, beforeAssistantCount);
     return waitForAnalysis(beforeSignatures);
   }
 
   async function runVerifyAnalysis(payload) {
     const beforeSignatures = regionResponseSignatures();
+    const beforeAssistantCount = assistantMessages().length;
     reportProgress(payload, 'uploading', 'Uploading the numbered region review to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-regions-review.jpg', payload);
-    await submitPrompt(payload.prompt, payload);
+    await submitPrompt(payload.prompt, payload, beforeAssistantCount);
     return waitForAnalysis(beforeSignatures);
   }
 
@@ -354,7 +369,7 @@
     const beforeUrls = new Set([...document.images].map(image => image.src));
     reportProgress(payload, 'uploading', 'Uploading this crop to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-crop.png', payload);
-    await submitPrompt(payload.prompt, payload);
+    await submitPrompt(payload.prompt, payload, before);
     return waitForEditedImage(beforeUrls, before, payload);
   }
 

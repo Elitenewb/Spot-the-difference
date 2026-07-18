@@ -220,6 +220,9 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(adapter.includes('responseComplete'));
   assert.ok(adapter.includes('function composerIsEmpty()'));
   assert.ok(adapter.includes('responseInProgress'));
+  assert.ok(adapter.includes('beforeAssistantCount'));
+  assert.ok(adapter.includes('Prompt click sent; waiting for ChatGPT’s response'));
+  assert.ok(adapter.includes('60000, \'ChatGPT did not acknowledge the prompt.\''));
   assert.ok(adapter.includes('composerIsEmpty() && responseComplete && !responseInProgress()'));
   assert.ok(adapter.includes('images.length && responseSettled'));
   assert.ok(adapter.includes('last?.querySelector(selector)'));
