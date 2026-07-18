@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 function loadBackgroundHarness() {
   const updates = [];
+  const reloads = [];
   const creations = [];
   const sentMessages = [];
   const updateListeners = new Set();
@@ -51,6 +52,12 @@ function loadBackgroundHarness() {
         });
         return { id: tabId, ...options };
       },
+      async reload(tabId) {
+        reloads.push({ tabId });
+        queueMicrotask(() => {
+          for (const listener of updateListeners) listener(tabId, { status: 'complete' });
+        });
+      },
       async create(options) { return { id: 77, ...options }; },
       async get(tabId) { return { id: tabId, windowId: 91 }; },
       async query() { return [{ id: 77, windowId: 91, active: true }]; },
@@ -66,19 +73,29 @@ function loadBackgroundHarness() {
   const context = { chrome, setTimeout: fastSetTimeout, clearTimeout, queueMicrotask, fetch, Uint8Array, btoa };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8'), context);
-  return { context, updates, creations, sentMessages, removeListeners, sessionStore, createdAlarms, clearedAlarms, alarmStore };
+  return { context, updates, reloads, creations, sentMessages, removeListeners, sessionStore, createdAlarms, clearedAlarms, alarmStore };
 }
 
-test('analysis uses temporary chat while crop editing uses regular chat', async () => {
+test('analysis uses temporary chat while crop editing uses regular chat without unsupported query parameters', async () => {
   const { context, updates } = loadBackgroundHarness();
   await context.openFreshChat(10, true);
   await context.openFreshChat(11, false);
   assert.match(updates[0].url, /temporary-chat=true/);
   assert.doesNotMatch(updates[1].url, /temporary-chat=true/);
-  assert.match(updates[0].url, /spotJob=/);
-  assert.match(updates[1].url, /spotJob=/);
+  assert.doesNotMatch(updates[0].url, /spotJob=/);
+  assert.equal(updates[1].url, 'https://chatgpt.com/');
   assert.equal(updates[0].active, true);
   assert.equal(updates[1].active, true);
+});
+
+test('fresh-chat navigation reloads when the fresh route is already open', async () => {
+  const { context, updates, reloads } = loadBackgroundHarness();
+  context.chrome.tabs.get = async tabId => ({ id: tabId, windowId: 91, url: 'https://chatgpt.com/?temporary-chat=true' });
+
+  await context.openFreshChat(10, true);
+
+  assert.deepEqual(updates, [{ tabId: 10, active: true }]);
+  assert.deepEqual(reloads, [{ tabId: 10 }]);
 });
 
 test('ChatGPT opens active in its own unfocused window behind Creator', async () => {

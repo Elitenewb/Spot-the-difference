@@ -497,6 +497,7 @@
       state.regions[2].instruction='Add a bright red bow inside this area.';
       const customPrompt=editPrompt(state.regions[2],cropGeometry(state.regions[2]),2);
       expect('custom instructions are passed into the edit prompt',customPrompt.includes('Make this requested change: Add a bright red bow inside this area.'));
+      expect('custom instructions omit automatic-edit guidance',!customPrompt.includes('Choose the change that best fits the crop'));
       expect('edited center pixel is composited',center[0]>180&&center[1]<80);
       expect('pixel beside the drawn box is not changed',outsideSelection===outsideBefore);
       expect('pixel outside the drawn box remains unchanged',outside===before);
@@ -509,8 +510,9 @@
 
   function editPrompt(region,geometry,index){
     const instruction=String(region.instruction||'').trim();
-    const requested=instruction?` Make this requested change: ${instruction}`:'';
-    return `TOOL POLICY: Do not call, open, or hand this task to Adobe, Photoshop, Canva, or any other external or connected app, plugin, action, API, or editing tool. Do not ask for tool permission. Use only ChatGPT's native image editing in this conversation. Edit this uploaded crop directly. Make exactly one clear, fun, reality-changing difference that will be noticeable in a spot-the-difference game when this crop is placed back into a larger image.${requested} Choose the change that best fits the crop; faces, expressions, hair, anatomy, objects, and scenery are valid targets. Do not add stickers, labels, or graphic overlays. Keep the crop framing and all unrelated content unchanged. Return only the edited image.`;
+    const base=`TOOL POLICY: Do not call, open, or hand this task to Adobe, Photoshop, Canva, or any other external or connected app, plugin, action, API, or editing tool. Do not ask for tool permission. Use only ChatGPT's native image editing in this conversation. Edit this uploaded crop directly. Make exactly one clear, fun, reality-changing difference that will be noticeable in a spot-the-difference game when this crop is placed back into a larger image.`;
+    if(instruction)return `${base} Make this requested change: ${instruction} Return only the edited image.`;
+    return `${base} Choose the change that best fits the crop; faces, expressions, hair, anatomy, objects, and scenery are valid targets. Do not add stickers, labels, or graphic overlays. Keep the crop framing and all unrelated content unchanged. Return only the edited image.`;
   }
 
   function startAiWorkflow(){

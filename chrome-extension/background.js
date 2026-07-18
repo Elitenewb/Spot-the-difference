@@ -144,12 +144,20 @@ async function cancelJob(jobId, appTabId) {
 }
 
 async function openFreshChat(tabId, temporary = true) {
+  const url = temporary ? `${CHATGPT_URL}?temporary-chat=true` : CHATGPT_URL;
+  const tab = await chrome.tabs.get(tabId);
   const waiting = waitForTabComplete(tabId);
-  const mode = temporary ? 'temporary-chat=true&' : '';
   // Keep ChatGPT selected inside its own unfocused window. Chrome may freeze a
   // truly inactive tab, but an active tab in an unfocused window remains
   // schedulable without pulling the user away from Creator.
-  await chrome.tabs.update(tabId, { url: `${CHATGPT_URL}?${mode}spotJob=${Date.now()}`, active: true });
+  // Reload only when this exact fresh-chat route is already open. This avoids
+  // relying on the unsupported `spotJob` query parameter as a cache buster.
+  if (tab.url === url) {
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.tabs.reload(tabId);
+  } else {
+    await chrome.tabs.update(tabId, { url, active: true });
+  }
   await waiting;
 }
 

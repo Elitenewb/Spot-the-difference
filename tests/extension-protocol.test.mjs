@@ -167,6 +167,7 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(!creator.includes('Do not beautify, normalize, retouch, symmetrize, or reconstruct a face'));
   assert.ok(!creator.includes('Never add, remove, replace, or alter a mustache'));
   assert.ok(creator.includes('Make this requested change: ${instruction}'));
+  assert.ok(creator.includes('if(instruction)return `${base} Make this requested change: ${instruction} Return only the edited image.`'));
   assert.ok(creator.includes("const instruction=String(region.instruction||'').trim()"));
   assert.ok(creator.includes("checkExtensionBtn.hidden=kind!=='error'"));
   assert.ok(creatorHtml.includes('Upload a photo'));
@@ -223,7 +224,7 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(player.includes('return regionToCss(region.reveal || region)'));
   assert.ok(player.includes('const b = revealToCss(cfg.regions[idx])'));
   assert.ok(creator.includes('Edit this uploaded crop directly'));
-  assert.ok(creatorHtml.includes('creator.js?v=21'));
+  assert.ok(creatorHtml.includes('creator.js?v=22'));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
   assert.ok(adapter.includes('responseComplete'));
   assert.ok(adapter.includes('function composerIsEmpty()'));
