@@ -23,11 +23,11 @@
 
   const MIN_DRAG_PX = 5;
   const AUTO_EDIT_VARIANTS = [
-    'Favor a clean removal or erasure: smoothly reconstruct the natural surface behind one visible feature, line, mark, or small object.',
-    'Favor a conspicuous color, pattern, or material change to one existing feature while preserving its shape, lighting, and texture.',
+    'Favor removing the smallest clearly removable non-anatomical element, such as an accessory, printed mark, loose object, decorative detail, spot, line, or symbol, and reconstruct only the surface directly behind it. If no such element exists, add one small obvious accessory or decorative object instead of altering anatomy.',
+    'Favor a conspicuous color, pattern, or material change to one existing non-anatomical object, accessory, or clothing detail while preserving its shape, lighting, and texture.',
     'Favor adding one scene-appropriate object or detail that looks as though it was always present.',
-    'Favor swapping one existing item, letter, number, symbol, or decorative motif for a different plausible counterpart of similar visual weight.',
-    'Favor a gently silly transformation such as changing an object\'s shape, scale, orientation, count, or material while keeping the scene believable.'
+    'Favor swapping one existing non-anatomical item, letter, number, symbol, accessory, or decorative motif for a different plausible counterpart of similar visual weight.',
+    'Favor a gently silly transformation of one object or accessory, such as changing its shape, scale, orientation, count, or material, while keeping the scene believable.'
   ];
   const ctxOriginal = els.origCanvas.getContext('2d');
   const ctxModified = els.modCanvas.getContext('2d');
@@ -503,7 +503,7 @@
       expect('blank instructions use the indexed edit-variety rotation',automaticPrompt.includes(AUTO_EDIT_VARIANTS[1]));
       state.regions[2].instruction='Add a bright red bow inside this area.';
       const customPrompt=editPrompt(state.regions[2],cropGeometry(state.regions[2]),2);
-      expect('custom instructions are passed into the edit prompt',customPrompt.includes('Perform this requested change: Add a bright red bow inside this area.'));
+      expect('custom instructions are passed into the edit prompt',customPrompt.includes('Perform exactly this one requested difference: Add a bright red bow inside this area.'));
       expect('edited center pixel is composited',center[0]>180&&center[1]<80);
       expect('pixel beside the drawn box is not changed',outsideSelection===outsideBefore);
       expect('pixel outside the drawn box remains unchanged',outside===before);
@@ -517,9 +517,9 @@
   function editPrompt(region,geometry,index){
     const instruction=String(region.instruction||'').trim();
     const requested=instruction
-      ?`Perform this requested change: ${instruction}`
-      :`Choose and perform one clear, playful, natural-looking change to the main visible feature intersecting the target center. ${AUTO_EDIT_VARIANTS[index%AUTO_EDIT_VARIANTS.length]} Make it noticeable at normal full-image viewing size; do not change a person's identity.`;
-    return `TOOL POLICY: Do not call Adobe, Photoshop, Canva, or any other external app, connected app, plugin, or editing tool. Do not open an external editor or ask for tool permission. Perform the image edit directly in this ChatGPT conversation and return the edited image. This uploaded image contains exactly the user-selected area for a fun classroom spot-the-difference puzzle; there are no surrounding context pixels. The entire image is the editable target. Keep changes harmless, playful, and visually clear; playful face edits such as changing glasses, adding a silly accessory, or making a gentle expression change are welcome when they preserve identity and remain non-graphic. ${requested} Never add margins, padding, borders, or new canvas area. Never add, remove, replace, or alter a mustache, and avoid facial-hair jokes. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve this image's exact rectangular framing and aspect ratio: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe it. Preserve lighting, texture, color profile, sharpness, and all unrelated details inside the selection. Do not add labels, highlights, watermarks, or explanatory text. Return one edited image only. This is edit ${index+1} of ${state.regions.length}.`;
+      ?`Perform exactly this one requested difference: ${instruction}`
+      :`Perform exactly one localized change. Choose the smallest clearly editable non-anatomical element nearest the image center. ${AUTO_EDIT_VARIANTS[index%AUTO_EDIT_VARIANTS.length]}`;
+    return `TOOL POLICY: Do not call Adobe, Photoshop, Canva, or any other external app, connected app, plugin, or editing tool. Do not open an external editor or ask for tool permission. Perform the image edit directly in this ChatGPT conversation and return the edited image. This uploaded image contains exactly the user-selected area for a fun classroom spot-the-difference puzzle; there are no surrounding context pixels. The entire image is the editable target. ${requested} The finished result must contain exactly one unmistakable difference that is plainly visible when this crop is reduced back to normal full-photo viewing size. A near-identical result, subtle retouch, general cleanup, or change visible only when zoomed in is a failure. If the planned change would be subtle, make that one difference larger or more contrasting while keeping it plausible. Unless the user's explicit instruction names one precise facial change, do not remove, erase, reshape, smooth, replace, or regenerate permanent human anatomy, including eyes, eyebrows, nose, nostrils, mouth, lips, teeth, ears, facial contours, hairline, or fingers. Do not beautify, normalize, retouch, symmetrize, or reconstruct a face. Preserve the person's exact expression, identity, pose, proportions, skin texture, and all facial asymmetry. When no suitable non-anatomical element exists, add one small but obvious harmless accessory or decorative object rather than modifying anatomy. Never add margins, padding, borders, or new canvas area. Never add, remove, replace, or alter a mustache, and avoid facial-hair jokes. Never move a whole limb, change a person's pose or body position, or reposition the subject. Preserve all pixels outside the smallest necessary edit area as closely as possible. Do not sharpen, restyle, relight, recolor, or regenerate unrelated content. Preserve this image's exact rectangular framing and aspect ratio: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe it. Preserve lighting, texture, color profile, grain, sharpness, and all unrelated details inside the selection. Do not add labels, highlights, watermarks, or explanatory text. Return one edited image only. This is edit ${index+1} of ${state.regions.length}.`;
   }
 
   function startAiWorkflow(){
