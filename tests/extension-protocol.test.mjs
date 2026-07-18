@@ -212,14 +212,15 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes('must never override the target rectangle in this crop'));
   assert.ok(creatorHtml.includes('creator.js?v=16'));
   assert.ok(background.includes('runRepairAnalysis(payload, appTabId)'));
-  assert.ok(adapter.includes('transientAssistantLabel'));
-  assert.ok(adapter.includes('transientLabelSince'));
-  assert.ok(adapter.includes('if (text && !newGeneratedImages.length) return { error: text.slice(0, 500) }'));
+  assert.ok(adapter.includes('responseComplete'));
+  assert.ok(adapter.includes('last?.querySelector(selector)'));
+  assert.ok(adapter.includes('if (text && responseComplete && !newImages.length)'));
+  assert.ok(adapter.includes('return { error: text.slice(0, 500) }'));
   assert.ok(adapter.includes('Adjust the edit prompt so the output will be acceptable under image-safety policy'));
   assert.ok(adapter.includes('refusalFollowupSent'));
   assert.ok(adapter.includes('ChatGPT returned text instead of an image; requesting an acceptable alternative'));
   assert.ok(adapter.includes('allMatches(SELECTORS.generatedImage)'));
-  assert.ok(adapter.includes('images.length && !firstMatch(SELECTORS.stop)'));
+  assert.ok(adapter.includes('if (images.length)'));
   assert.ok(adapter.includes('filter(isVisible)'));
   assert.ok(adapter.includes("conversationTurn: ['[data-testid^=\"conversation-turn-\"]']"));
   assert.ok(adapter.includes('waitForAnalysis(beforeSignatures)'));
@@ -236,7 +237,6 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(!adapter.includes('ChatGPT did not return parseable region JSON within three minutes'));
   assert.ok(!adapter.includes('if (firstMatch(SELECTORS.stop)) return null'));
   assert.ok(adapter.includes('if (!beforeSignatures.has(JSON.stringify(regions))) return regions'));
-  assert.ok(adapter.includes("generatedCard: ['[role=\"button\"] img[alt^=\"Generated image:\"]']"));
   assert.ok(adapter.includes("viewerImage: ['[role=\"dialog\"] img']"));
   assert.ok(adapter.includes("300000, 'ChatGPT did not return a retrievable edited image within five minutes.'"));
 });

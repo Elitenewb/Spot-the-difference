@@ -14,10 +14,9 @@
     assistant: ['[data-message-author-role="assistant"]'],
     user: ['[data-message-author-role="user"]'],
     conversationTurn: ['[data-testid^="conversation-turn-"]'],
-    generatedCard: ['[role="button"] img[alt^="Generated image:"]'],
     generatedImage: ['img[alt^="Generated image:"]'],
     viewerImage: ['[role="dialog"] img'],
-    stop: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop generating"]']
+    responseComplete: ['button[data-testid="copy-turn-action-button"]']
   };
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -160,7 +159,7 @@
     element.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
   }
 
-  async function submitPrompt(prompt, payload, beforeCount) {
+  async function submitPrompt(prompt, payload) {
     const composer = await waitFor(() => firstMatch(SELECTORS.composer), 30000, 'ChatGPT’s composer was not found. Sign in, then try again.');
     setComposerText(composer, prompt);
     const send = await waitFor(() => {
@@ -171,7 +170,7 @@
     reportProgress(payload, 'submitted', 'Prompt sent. Waiting for ChatGPT’s response…');
     await waitFor(() => {
       const text = composer.innerText || composer.textContent || composer.value || '';
-      return !text.trim() || assistantMessages().length > beforeCount || firstMatch(SELECTORS.stop);
+      return !text.trim();
     }, 12000, 'ChatGPT did not submit the prompt. Open the ChatGPT tab, confirm the attachment finished uploading, then retry.');
   }
 
@@ -260,7 +259,6 @@
   async function waitForEditedImage(beforeUrls, beforeCount, payload) {
     let responseStart = beforeCount;
     let refusalFollowupSent = false;
-    let transientLabelSince = 0;
     let result;
     while (!result?.image) {
       result = await waitFor(() => {
@@ -269,29 +267,25 @@
         const last = responseMessages[responseMessages.length - 1] || messages[messages.length - 1];
         const scopedImages = responseMessages.flatMap(message => [...message.querySelectorAll('img')]);
         const generatedImages = allMatches(SELECTORS.generatedImage).filter(isVisible);
-        const newGeneratedImages = generatedImages.filter(image => !beforeUrls.has(image.currentSrc || image.src));
         const viewerImages = allMatches(SELECTORS.viewerImage).filter(isVisible);
-        const images = [...new Set([...generatedImages, ...viewerImages, ...scopedImages.filter(isVisible)])].filter(image => {
+        const newImages = [...new Set([...generatedImages, ...viewerImages, ...scopedImages.filter(isVisible)])].filter(image => {
           const source = image.currentSrc || image.src;
-          return source && !beforeUrls.has(source) && image.naturalWidth >= 256 && image.naturalHeight >= 256;
+          return source && !beforeUrls.has(source);
         });
-        // Wait for the generation indicator to clear before capturing an image.
-        // ChatGPT can replace a progressive render with a different final image.
-        if (images.length && !firstMatch(SELECTORS.stop)) {
+        const images = newImages.filter(image => image.naturalWidth >= 256 && image.naturalHeight >= 256);
+        // A loaded Generated image element is the usable-result boundary.
+        // ChatGPT can leave “Stop answering” visible after this point.
+        if (images.length) {
           reportProgress(payload, 'opening', 'Reading ChatGPT’s finished image…');
-          return { image: images[0] };
+          return { image: images[images.length - 1] };
         }
-        if (messages.length > responseStart && !firstMatch(SELECTORS.stop)) {
+        if (messages.length > responseStart) {
           const text = (last.innerText || last.textContent || '').trim();
-          // ChatGPT can add a short assistant label such as “Edit” before the
-          // generated image element has loaded. Treat that as in-progress, not
-          // as a refusal, so the recovery prompt is never typed into a busy composer.
-          const transientAssistantLabel = /^(edit|edited|image edit)$/i.test(text.replace(/\s+/g, ' ').trim());
-          if (transientAssistantLabel && !newGeneratedImages.length) {
-            if (!transientLabelSince) transientLabelSince = Date.now();
-            if (Date.now() - transientLabelSince < 15000) return null;
-          }
-          if (text && !newGeneratedImages.length) return { error: text.slice(0, 500) };
+          // Completed assistant turns expose response actions. Transitional
+          // labels such as “Thinking” and “Edit” do not, so they cannot trigger
+          // refusal recovery while an image is still loading.
+          const responseComplete = SELECTORS.responseComplete.some(selector => last?.querySelector(selector));
+          if (text && responseComplete && !newImages.length) return { error: text.slice(0, 500) };
         }
         return null;
       }, 300000, 'ChatGPT did not return a retrievable edited image within five minutes.');
@@ -300,11 +294,10 @@
       refusalFollowupSent = true;
       reportProgress(payload, 'submitted', 'ChatGPT returned text instead of an image; requesting an acceptable alternative…');
       const followupBefore = assistantMessages().length;
-      await submitPrompt(SAFE_EDIT_FOLLOWUP, payload, followupBefore);
+      await submitPrompt(SAFE_EDIT_FOLLOWUP, payload);
       responseStart = followupBefore;
       result = null;
     }
-    await waitFor(() => !firstMatch(SELECTORS.stop), 120000, 'ChatGPT’s image generation did not finish.').catch(() => true);
     await sleep(1200);
     const source = result.image.currentSrc || result.image.src;
     if (source.startsWith('data:')) return { imageDataUrl: source };
@@ -323,10 +316,9 @@
 
   async function runAnalysis(payload) {
     const beforeSignatures = regionResponseSignatures();
-    const before = assistantMessages().length;
     reportProgress(payload, 'uploading', 'Uploading the analysis image to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-original.jpg', payload);
-    await submitPrompt(payload.prompt, payload, before);
+    await submitPrompt(payload.prompt, payload);
     const regions = await waitForAnalysis(beforeSignatures);
     reportProgress(payload, 'parsed', `Parsed ${regions.length} region suggestions from ChatGPT.`);
     return regions;
@@ -334,18 +326,16 @@
 
   async function runRepairAnalysis(payload) {
     const beforeSignatures = regionResponseSignatures();
-    const before = assistantMessages().length;
     reportProgress(payload, 'submitted', 'Requesting replacement suggestions from ChatGPT…');
-    await submitPrompt(payload.prompt, payload, before);
+    await submitPrompt(payload.prompt, payload);
     return waitForAnalysis(beforeSignatures);
   }
 
   async function runVerifyAnalysis(payload) {
     const beforeSignatures = regionResponseSignatures();
-    const before = assistantMessages().length;
     reportProgress(payload, 'uploading', 'Uploading the numbered region review to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-regions-review.jpg', payload);
-    await submitPrompt(payload.prompt, payload, before);
+    await submitPrompt(payload.prompt, payload);
     return waitForAnalysis(beforeSignatures);
   }
 
@@ -354,7 +344,7 @@
     const beforeUrls = new Set([...document.images].map(image => image.src));
     reportProgress(payload, 'uploading', 'Uploading this crop to ChatGPT…');
     await uploadImage(payload.imageDataUrl, 'spot-crop.png', payload);
-    await submitPrompt(payload.prompt, payload, before);
+    await submitPrompt(payload.prompt, payload);
     return waitForEditedImage(beforeUrls, before, payload);
   }
 
