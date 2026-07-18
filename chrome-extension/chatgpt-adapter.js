@@ -358,6 +358,31 @@
     return waitForEditedImage(beforeUrls, before, payload);
   }
 
+  async function deliverTaskResult(payload) {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'SD_CHATGPT_TASK_RESULT', payload });
+        if (response?.received) return;
+        lastError = new Error('The background worker did not accept the ChatGPT result.');
+      } catch (error) {
+        lastError = error;
+      }
+      await sleep(500);
+    }
+    throw lastError || new Error('Could not deliver the ChatGPT result.');
+  }
+
+  async function startTask(kind, payload, task) {
+    let result;
+    try {
+      result = { ok: true, ...await task() };
+    } catch (error) {
+      result = { ok: false, error: error.message };
+    }
+    await deliverTaskResult({ jobId: payload.jobId, regionId: payload.regionId, kind, ...result });
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'SD_CHATGPT_PROBE_ANALYSIS') {
       probeAnalysis().then(regions => sendResponse({ ok: true, pending: !regions, regions })).catch(error => sendResponse({ ok: false, error: error.message }));
@@ -376,8 +401,12 @@
       return true;
     }
     if (message.type === 'SD_CHATGPT_EDIT') {
-      runEdit(message.payload).then(result => sendResponse({ ok: true, ...result })).catch(error => sendResponse({ ok: false, error: error.message }));
-      return true;
+      // A generated image can take minutes. A Chrome message port is not a
+      // durable job queue, so acknowledge immediately and report completion in
+      // a separate message that wakes the background worker when it is ready.
+      startTask('edit', message.payload, () => runEdit(message.payload)).catch(() => {});
+      sendResponse({ accepted: true });
+      return;
     }
   });
 })();

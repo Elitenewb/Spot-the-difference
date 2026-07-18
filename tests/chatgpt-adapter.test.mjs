@@ -249,3 +249,50 @@ test('prompt submission is not inferred from an unrelated assistant update', asy
   );
   assert.equal(composer.value, 'safe follow-up');
 });
+
+test('a completed image edit is delivered as a separate acknowledged task result', async () => {
+  const delivered = [];
+  const documentMock = {
+    documentElement: {},
+    addEventListener() {},
+    removeEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    images: []
+  };
+  const exposedSource = adapterSource.replace(
+    /\}\)\(\);\s*$/,
+    'globalThis.__spotDiffAdapterTest = { startTask };})();'
+  );
+  const context = vm.createContext({
+    document: documentMock,
+    chrome: {
+      runtime: {
+        onMessage: { addListener() {} },
+        async sendMessage(message) {
+          delivered.push(message);
+          return { received: true };
+        }
+      }
+    },
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    globalThis: null
+  });
+  context.globalThis = context;
+  vm.runInContext(exposedSource, context);
+
+  await context.__spotDiffAdapterTest.startTask(
+    'edit',
+    { jobId: 'edit-job', regionId: 'region-1' },
+    async () => ({ imageUrl: 'https://example.test/generated.png' })
+  );
+
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].type, 'SD_CHATGPT_TASK_RESULT');
+  assert.equal(delivered[0].payload.ok, true);
+  assert.equal(delivered[0].payload.jobId, 'edit-job');
+  assert.equal(delivered[0].payload.imageUrl, 'https://example.test/generated.png');
+});

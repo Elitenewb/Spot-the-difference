@@ -18,7 +18,7 @@
     mode:'ai', naturalW:0, naturalH:0, originalImage:null, modifiedImage:null,
     regions:[], appliedPatches:new Map(), workCanvas:document.createElement('canvas'), extensionConnected:false,
     dragging:false, dragStart:null, dragCurrent:null, selectedRegionId:null, activeJobId:null, aiBusy:false,
-    editQueue:[], editCompleted:0, editTotal:0, editRetries:new Map(), pendingEditSources:new Map(), jobTimer:null, workflowPhase:'idle', aiProgressPercent:0
+    editQueue:[], editCompleted:0, editTotal:0, jobTimer:null, workflowPhase:'idle', aiProgressPercent:0
   };
 
   const MIN_DRAG_PX = 5;
@@ -52,7 +52,7 @@
     clearJobTimer();
     state.naturalW=0; state.naturalH=0; state.originalImage=null; state.modifiedImage=null;
     state.regions=[]; state.appliedPatches.clear(); state.workCanvas.width=0; state.workCanvas.height=0;
-    state.selectedRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[]; state.editRetries.clear(); state.pendingEditSources.clear();
+    state.selectedRegionId=null; state.activeJobId=null; state.aiBusy=false; state.editQueue=[];
     for(const input of [els.modFile,els.origFile,els.aiOrigFile]) input.value='';
     updateRegionList(); fitCanvasSize();
   }
@@ -351,59 +351,32 @@
     const url=URL.createObjectURL(blob); const link=document.createElement('a'); link.href=url; link.download=name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   function downloadDataUrl(dataUrl,name){ const link=document.createElement('a'); link.href=dataUrl; link.download=name; document.body.appendChild(link); link.click(); link.remove(); }
-  function editFrameMatches(image,geometry){
+  function editFrameSourceRect(image,geometry){
     const expectedRatio=geometry.cropW/geometry.cropH;
     const returnedRatio=image.naturalWidth/image.naturalHeight;
-    return Math.abs(returnedRatio/expectedRatio-1)<=.025;
+    if(returnedRatio>expectedRatio){
+      const width=image.naturalHeight*expectedRatio;
+      return {x:(image.naturalWidth-width)/2,y:0,width,height:image.naturalHeight};
+    }
+    const height=image.naturalWidth/expectedRatio;
+    return {x:0,y:(image.naturalHeight-height)/2,width:image.naturalWidth,height};
   }
 
-  async function editChangeFitsTarget(sourceDataUrl,image,geometry){
-    if(!sourceDataUrl)return true;
-    const source=await imageFromDataUrl(sourceDataUrl);
-    const size=64,sourceCanvas=document.createElement('canvas'),outputCanvas=document.createElement('canvas');
-    sourceCanvas.width=outputCanvas.width=size; sourceCanvas.height=outputCanvas.height=size;
-    sourceCanvas.getContext('2d').drawImage(source,0,0,size,size);
-    outputCanvas.getContext('2d').drawImage(image,0,0,size,size);
-    const before=sourceCanvas.getContext('2d').getImageData(0,0,size,size).data;
-    const after=outputCanvas.getContext('2d').getImageData(0,0,size,size).data;
-    const changed=[];
-    const threshold=34;
-    for(let y=0;y<size;y++)for(let x=0;x<size;x++){
-      const offset=(y*size+x)*4;
-      const difference=Math.abs(after[offset]-before[offset])+Math.abs(after[offset+1]-before[offset+1])+Math.abs(after[offset+2]-before[offset+2]);
-      changed.push(difference>=threshold);
-    }
-    const targetCell=(x,y)=>x/size*geometry.cropW>=geometry.targetX&&x/size*geometry.cropW<=geometry.targetX+geometry.targetW&&y/size*geometry.cropH>=geometry.targetY&&y/size*geometry.cropH<=geometry.targetY+geometry.targetH;
-    const safeCell=(x,y)=>x/size*geometry.cropW>=geometry.applyX&&x/size*geometry.cropW<=geometry.applyX+geometry.applyW&&y/size*geometry.cropH>=geometry.applyY&&y/size*geometry.cropH<=geometry.applyY+geometry.applyH;
-    const visited=new Set(),queue=[];
-    for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(changed[y*size+x]&&targetCell(x,y)){const key=y*size+x;visited.add(key);queue.push(key);}
-    while(queue.length){
-      const key=queue.shift(),x=key%size,y=Math.floor(key/size);
-      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
-        const nx=x+dx,ny=y+dy,next=ny*size+nx;
-        if(nx>=0&&nx<size&&ny>=0&&ny<size&&changed[next]&&!visited.has(next)){visited.add(next);queue.push(next);}
-      }
-    }
-    const changedCount=changed.filter(Boolean).length;
-    if(!changedCount)return false;
-    for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(changed[y*size+x]&&(!safeCell(x,y)||!visited.has(y*size+x)))return false;
-    return visited.size>0;
+  function normalizeEditFrame(image,geometry){
+    const source=editFrameSourceRect(image,geometry);
+    const canvas=document.createElement('canvas'); canvas.width=geometry.cropW; canvas.height=geometry.cropH;
+    canvas.getContext('2d').drawImage(image,source.x,source.y,source.width,source.height,0,0,geometry.cropW,geometry.cropH);
+    return canvas;
   }
 
   async function applyPatch(region,dataUrl){
     const image=await imageFromDataUrl(dataUrl);
     const geometry=cropGeometry(region);
-    if(!editFrameMatches(image,geometry)){
-      const error=new Error(`ChatGPT reframed this edit (${image.naturalWidth}×${image.naturalHeight} instead of the crop's ${geometry.cropW}×${geometry.cropH} shape).`);
-      error.code='EDIT_FRAME_MISMATCH';
-      throw error;
-    }
-    if(!(await editChangeFitsTarget(state.pendingEditSources.get(region.id),image,geometry))){
-      const error=new Error('ChatGPT changed pixels outside the selected area instead of making a localized difference.');
-      error.code='EDIT_OFF_TARGET';
-      throw error;
-    }
-    state.appliedPatches.set(region.id,{dataUrl,geometry});
+    // Image generation may redraw or re-encode the whole crop and may return a
+    // different aspect ratio. Normalize it once, then rely on the deterministic
+    // safe-area compositor below instead of rejecting a visually valid result.
+    const normalizedDataUrl=normalizeEditFrame(image,geometry).toDataURL('image/png');
+    state.appliedPatches.set(region.id,{dataUrl:normalizedDataUrl,geometry});
     await recomposeAllPatches();
     region.status='done';
     updateRegionList(); draw();
@@ -491,11 +464,6 @@
       const edited=document.createElement('canvas'); edited.width=geometry.cropW; edited.height=geometry.cropH;
       edited.getContext('2d').drawImage(await imageFromDataUrl(crop.dataUrl),0,0);
       edited.getContext('2d').fillStyle='#e22635'; edited.getContext('2d').fillRect(geometry.targetX,geometry.targetY-8,geometry.targetW,geometry.targetH+8);
-      const offTarget=document.createElement('canvas'); offTarget.width=geometry.cropW; offTarget.height=geometry.cropH;
-      offTarget.getContext('2d').drawImage(await imageFromDataUrl(crop.dataUrl),0,0);
-      offTarget.getContext('2d').fillStyle='#e22635'; offTarget.getContext('2d').fillRect(geometry.applyX+2,geometry.applyY+2,Math.max(4,Math.floor(geometry.targetW*.2)),Math.max(4,Math.floor(geometry.targetH*.2)));
-      const editedImage=await imageFromDataUrl(edited.toDataURL('image/png'));
-      const offTargetImage=await imageFromDataUrl(offTarget.toDataURL('image/png'));
       const before=source.getContext('2d').getImageData(0,0,1,1).data.join(',');
       await applyPatch(first,edited.toDataURL('image/png'));
       const centerX=geometry.cropX+geometry.targetX+Math.floor(geometry.targetW/2),centerY=geometry.cropY+geometry.targetY+Math.floor(geometry.targetH/2);
@@ -509,9 +477,8 @@
       expect('crop includes context and stays below full image size',geometry.cropW>geometry.targetW&&geometry.cropH>geometry.targetH&&geometry.cropW<1200&&geometry.cropH<675);
       expect('AI edit crop uses a square canvas',geometry.cropW===geometry.cropH);
       expect('composite area gives connected edits room beyond the drawn box',geometry.applyW>geometry.targetW&&geometry.applyH>geometry.targetH);
-      expect('connected edits overlap the selected target',await editChangeFitsTarget(crop.dataUrl,editedImage,geometry));
-      expect('disconnected off-target edits are rejected',!(await editChangeFitsTarget(crop.dataUrl,offTargetImage,geometry)));
-      expect('materially reframed editor output is rejected',!editFrameMatches({naturalWidth:2109,naturalHeight:746},geometry));
+      const normalizedSource=editFrameSourceRect({naturalWidth:2109,naturalHeight:746},geometry);
+      expect('wide editor output is center-cropped instead of regenerated',normalizedSource.width<2109&&normalizedSource.height===746);
       state.regions[1].instruction='';
       const automaticPrompt=editPrompt(state.regions[1],cropGeometry(state.regions[1]),1);
       expect('blank instructions use the indexed edit-variety rotation',automaticPrompt.includes(AUTO_EDIT_VARIANTS[1]));
@@ -534,13 +501,11 @@
     const safeLeft=Math.round(geometry.applyX/geometry.cropW*100),safeTop=Math.round(geometry.applyY/geometry.cropH*100);
     const safeRight=Math.round((geometry.applyX+geometry.applyW)/geometry.cropW*100),safeBottom=Math.round((geometry.applyY+geometry.applyH)/geometry.cropH*100);
     const centerX=Math.round((left+right)/2),centerY=Math.round((top+bottom)/2);
-    const retry=state.editRetries.get(region.id)||0;
-    const retryNote=retry?' A previous result changed the canvas framing, so preserving this exact square canvas is mandatory.':'';
     const instruction=String(region.instruction||'').trim();
     const requested=instruction
       ?`Perform this requested change: ${instruction}`
       :`Choose and perform one clear, playful, natural-looking change to the main visible feature intersecting the target center. ${AUTO_EDIT_VARIANTS[index%AUTO_EDIT_VARIANTS.length]} Make it noticeable at normal full-image viewing size; do not change a person's identity.`;
-    return `TOOL POLICY: Do not call Adobe, Photoshop, Canva, or any other external app, connected app, plugin, or editing tool. Do not open an external editor or ask for tool permission. Perform the image edit directly in this ChatGPT conversation and return the edited image. Edit this square crop for a fun classroom spot-the-difference puzzle. The only editable subject is the feature intersecting the center point at approximately ${centerX}% across and ${centerY}% down, inside the target rectangle from ${left}%–${right}% across and ${top}%–${bottom}% down. Directional words such as left, right, upper, lower, top, or bottom refer to the original full image and must never override the target rectangle in this crop. If similar people or objects appear elsewhere, do not edit them. Keep changes harmless, playful, and visually clear; playful face edits such as changing glasses, adding a silly accessory, or making a gentle expression change are welcome when they preserve identity and remain non-graphic. ${requested} Concentrate the change inside the target. If that same connected feature crosses the target edge, complete the edit naturally across the whole feature, but never extend beyond the safe compositing rectangle from ${safeLeft}%–${safeRight}% across and ${safeTop}%–${safeBottom}% down. Never add, remove, replace, or alter a mustache, and avoid facial-hair jokes. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact square canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe the image.${retryNote} Preserve lighting, texture, color profile, sharpness, and all unrelated details. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited square image only. This is edit ${index+1} of ${state.regions.length}.`;
+    return `TOOL POLICY: Do not call Adobe, Photoshop, Canva, or any other external app, connected app, plugin, or editing tool. Do not open an external editor or ask for tool permission. Perform the image edit directly in this ChatGPT conversation and return the edited image. Edit this square crop for a fun classroom spot-the-difference puzzle. The only editable subject is the feature intersecting the center point at approximately ${centerX}% across and ${centerY}% down, inside the target rectangle from ${left}%–${right}% across and ${top}%–${bottom}% down. Directional words such as left, right, upper, lower, top, or bottom refer to the original full image and must never override the target rectangle in this crop. If similar people or objects appear elsewhere, do not edit them. Keep changes harmless, playful, and visually clear; playful face edits such as changing glasses, adding a silly accessory, or making a gentle expression change are welcome when they preserve identity and remain non-graphic. ${requested} Concentrate the change inside the target. If that same connected feature crosses the target edge, complete the edit naturally across the whole feature, but never extend beyond the safe compositing rectangle from ${safeLeft}%–${safeRight}% across and ${safeTop}%–${safeBottom}% down. Never add, remove, replace, or alter a mustache, and avoid facial-hair jokes. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact square canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe the image. Preserve lighting, texture, color profile, sharpness, and all unrelated details. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited square image only. This is edit ${index+1} of ${state.regions.length}.`;
   }
 
   function startAiWorkflow(){
@@ -556,8 +521,6 @@
     setExtensionStatus('busy','ChatGPT edit queue is running…');
     els.aiRunStatus.textContent=`Preparing ${regions.length} crop edit${regions.length===1?'':'s'}…`;
     state.editQueue=regions.map(region=>{region.status='queued';return region.id;});
-    state.editRetries.clear();
-    state.pendingEditSources.clear();
     state.editCompleted=0; state.editTotal=state.editQueue.length;
     updateRegionList(); updateControls();
     sendNextEdit();
@@ -573,7 +536,6 @@
     const region=state.regions.find(item=>item.id===regionId);
     if(!region){state.editQueue.shift();sendNextEdit();return;}
     const crop=makeCrop(region);
-    state.pendingEditSources.set(region.id,crop.dataUrl);
     const edit={regionId:region.id,imageDataUrl:crop.dataUrl,prompt:editPrompt(region,crop.geometry,state.regions.indexOf(region))};
     region.status='editing';
     els.aiRunStatus.textContent=`Creating difference ${state.editCompleted+1} of ${state.editTotal}…`;
@@ -633,19 +595,7 @@
           state.editQueue.shift(); state.editCompleted++;
           setAiProgress(15+(state.editCompleted/state.editTotal)*85);
           sendNextEdit();
-        }catch(error){
-          const retries=state.editRetries.get(region.id)||0;
-          if((error.code==='EDIT_FRAME_MISMATCH'||error.code==='EDIT_OFF_TARGET')&&retries<2){
-            state.editRetries.set(region.id,retries+1);
-            region.status='queued';
-            els.aiRunStatus.textContent=error.code==='EDIT_OFF_TARGET'
-              ?`ChatGPT changed outside difference ${state.regions.indexOf(region)+1}; retrying automatically…`
-              :`ChatGPT reframed difference ${state.regions.indexOf(region)+1}; retrying automatically…`;
-            updateRegionList(); sendNextEdit();
-          }else{
-            region.status='error'; failAi(error.message);
-          }
-        }
+        }catch(error){ region.status='error'; failAi(error.message); }
       }
     }
     if(type==='SPOT_DIFF_JOB_CANCELLED'&&payload?.jobId===state.activeJobId)finishCancelled(payload.message);

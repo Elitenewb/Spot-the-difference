@@ -260,6 +260,7 @@ async function runVerifyAnalysis(payload, appTabId) {
 
 async function runEdit(payload, appTabId) {
   const { jobId, edit } = payload;
+  let accepted = false;
   try {
     cancelledJobIds.delete(jobId);
     await forward(appTabId, 'SPOT_DIFF_EDIT_PROGRESS', { jobId, regionId: edit.regionId, status: 'editing', message: 'Opening a fresh ChatGPT edit chat…' });
@@ -268,15 +269,38 @@ async function runEdit(payload, appTabId) {
       { appTabId, jobId, kind: 'edit', regionId: edit.regionId },
       false
     );
-    if (!response?.ok) throw new Error(response?.error || 'ChatGPT did not return an edited image.');
-    let imageDataUrl = response.imageDataUrl;
-    if (!imageDataUrl && response.imageUrl) imageDataUrl = await fetchAsDataUrl(response.imageUrl);
-    if (!imageDataUrl) throw new Error('The generated image could not be retrieved from ChatGPT.');
-    await forward(appTabId, 'SPOT_DIFF_EDIT_RESULT', { jobId, regionId: edit.regionId, imageDataUrl });
+    if (response?.alreadyForwarded) return;
+    if (!response?.accepted) throw new Error(response?.error || 'ChatGPT did not accept the edit task.');
+    accepted = true;
   } catch (error) {
     if (!cancelledJobIds.has(jobId)) await forward(appTabId, 'SPOT_DIFF_AI_ERROR', { jobId, message: error.message });
   } finally {
-    for (const [tabId, job] of await activeJobEntries()) if (job.jobId === jobId && job.kind === 'edit') await forgetActiveJob(tabId);
+    // Once accepted, the adapter owns the long-running task and will send a
+    // durable completion event. Keep its persisted route until that arrives.
+    if (!accepted) for (const [tabId, job] of await activeJobEntries()) if (job.jobId === jobId && job.kind === 'edit') await forgetActiveJob(tabId);
+  }
+}
+
+async function handleTaskResult(payload, chatTabId) {
+  const job = await activeJobFor(chatTabId);
+  if (!job || job.kind !== 'edit' || payload?.kind !== 'edit' || payload.jobId !== job.jobId) return false;
+  try {
+    if (jobWasCancelled(job)) return true;
+    if (!payload.ok) throw new Error(payload.error || 'ChatGPT image edit failed.');
+    let imageDataUrl = payload.imageDataUrl;
+    if (!imageDataUrl && payload.imageUrl) imageDataUrl = await fetchAsDataUrl(payload.imageUrl);
+    if (!imageDataUrl) throw new Error('The generated image could not be retrieved from ChatGPT.');
+    await forward(job.appTabId, 'SPOT_DIFF_EDIT_RESULT', {
+      jobId: job.jobId,
+      regionId: job.regionId,
+      imageDataUrl
+    });
+    return true;
+  } catch (error) {
+    if (!cancelledJobIds.has(job.jobId)) await forward(job.appTabId, 'SPOT_DIFF_AI_ERROR', { jobId: job.jobId, message: error.message });
+    return true;
+  } finally {
+    await forgetActiveJob(chatTabId);
   }
 }
 
@@ -309,6 +333,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }).catch(() => {});
     return;
+  }
+  if (message.type === 'SD_CHATGPT_TASK_RESULT') {
+    handleTaskResult(message.payload, sender.tab.id).then(received => sendResponse({ received }));
+    return true;
   }
   if (message.type === 'SPOT_DIFF_ANALYZE') {
     if (!validAnalysisPayload(message.payload)) return;

@@ -130,6 +130,41 @@ test('active job routing survives service worker memory loss', async () => {
   assert.equal(recovered.kind, 'analysis');
 });
 
+test('an accepted image edit stays routed until its separate completion event arrives', async () => {
+  const { context, sessionStore } = loadBackgroundHarness();
+  const forwarded = [];
+  context.forward = async (_tabId, type, payload) => { forwarded.push({ type, payload }); return true; };
+  context.chrome.tabs.sendMessage = async (_tabId, message) => {
+    if (message.type === 'SD_CHATGPT_EDIT') return { accepted: true };
+    throw new Error(`Unexpected message ${message.type}`);
+  };
+
+  await context.runEdit({
+    jobId: 'edit-job',
+    edit: {
+      regionId: 'region-1',
+      imageDataUrl: 'data:image/png;base64,AAAA',
+      prompt: 'Make one harmless localized change.'
+    }
+  }, 5);
+
+  assert.equal(forwarded.length, 1, 'acceptance should only emit the opening progress update');
+  assert.equal(sessionStore['activeJob:77'].jobId, 'edit-job', 'the completion route must outlive the initial message');
+
+  vm.runInContext('activeJobs.clear()', context);
+  assert.equal(await context.handleTaskResult({
+    jobId: 'edit-job',
+    regionId: 'region-1',
+    kind: 'edit',
+    ok: true,
+    imageDataUrl: 'data:image/png;base64,BBBB'
+  }, 77), true);
+
+  assert.equal(forwarded.at(-1).type, 'SPOT_DIFF_EDIT_RESULT');
+  assert.equal(forwarded.at(-1).payload.imageDataUrl, 'data:image/png;base64,BBBB');
+  assert.equal(sessionStore['activeJob:77'], undefined);
+});
+
 test('alarm probe wakes a background analysis tab and forwards ten regions after worker memory loss', async () => {
   const { context, sessionStore, createdAlarms, clearedAlarms } = loadBackgroundHarness();
   const regions = Array.from({ length: 10 }, (_, index) => ({ xNorm: index / 20, yNorm: .1, wNorm: .04, hNorm: .04, instruction: `Region ${index + 1}` }));
