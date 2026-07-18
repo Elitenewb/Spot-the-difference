@@ -331,13 +331,10 @@
     const cropX=Math.round(clamp(x+w/2-side/2,0,state.naturalW-side));
     const cropY=Math.round(clamp(y+h/2-side/2,0,state.naturalH-side));
     const targetX=Math.round(x-cropX),targetY=Math.round(y-cropY),targetW=Math.max(1,Math.round(w)),targetH=Math.max(1,Math.round(h));
-    // The drawn rectangle remains the puzzle's hit target, but the composited
-    // image needs a little room to finish a connected feature crossing its edge
-    // (for example, a hat whose brim sits just above a selected face).
-    const bleedX=Math.max(18,Math.round(targetW*.45)),bleedY=Math.max(18,Math.round(targetH*.45));
-    const applyX=Math.max(0,targetX-bleedX),applyY=Math.max(0,targetY-bleedY);
-    const applyRight=Math.min(side,targetX+targetW+bleedX),applyBottom=Math.min(side,targetY+targetH+bleedY);
-    return {cropX,cropY,cropW:side,cropH:side,targetX,targetY,targetW,targetH,applyX,applyY,applyW:applyRight-applyX,applyH:applyBottom-applyY};
+    // ChatGPT receives a larger square crop for context, but only the exact
+    // user-drawn rectangle is allowed back onto the finished puzzle image.
+    const applyX=targetX,applyY=targetY,applyW=targetW,applyH=targetH;
+    return {cropX,cropY,cropW:side,cropH:side,targetX,targetY,targetW,targetH,applyX,applyY,applyW,applyH};
   }
 
   function makeCrop(region){
@@ -374,7 +371,7 @@
     const geometry=cropGeometry(region);
     // Image generation may redraw or re-encode the whole crop and may return a
     // different aspect ratio. Normalize it once, then rely on the deterministic
-    // safe-area compositor below instead of rejecting a visually valid result.
+    // exact-target compositor below instead of rejecting a visually valid result.
     const normalizedDataUrl=normalizeEditFrame(image,geometry).toDataURL('image/png');
     state.appliedPatches.set(region.id,{dataUrl:normalizedDataUrl,geometry});
     await recomposeAllPatches();
@@ -425,6 +422,7 @@
     const geometry=saved.geometry;
     const applyX=geometry.applyX??geometry.targetX,applyY=geometry.applyY??geometry.targetY;
     const applyW=geometry.applyW??geometry.targetW,applyH=geometry.applyH??geometry.targetH;
+    if(applyX===geometry.targetX&&applyY===geometry.targetY&&applyW===geometry.targetW&&applyH===geometry.targetH)return null;
     return {
       xNorm:(geometry.cropX+applyX)/state.naturalW,
       yNorm:(geometry.cropY+applyY)/state.naturalH,
@@ -484,6 +482,7 @@
       edited.getContext('2d').drawImage(await imageFromDataUrl(crop.dataUrl),0,0);
       edited.getContext('2d').fillStyle='#e22635'; edited.getContext('2d').fillRect(geometry.targetX,geometry.targetY-8,geometry.targetW,geometry.targetH+8);
       const before=source.getContext('2d').getImageData(0,0,1,1).data.join(',');
+      const bleedBefore=source.getContext('2d').getImageData(centerX,geometry.cropY+geometry.targetY-5,1,1).data.join(',');
       await applyPatch(first,edited.toDataURL('image/png'));
       const centerX=geometry.cropX+geometry.targetX+Math.floor(geometry.targetW/2),centerY=geometry.cropY+geometry.targetY+Math.floor(geometry.targetH/2);
       const center=state.workCanvas.getContext('2d').getImageData(centerX,centerY,1,1).data;
@@ -495,7 +494,7 @@
       expect('all normalized regions are valid',state.regions.every(validRegion));
       expect('crop includes context and stays below full image size',geometry.cropW>geometry.targetW&&geometry.cropH>geometry.targetH&&geometry.cropW<1200&&geometry.cropH<675);
       expect('AI edit crop uses a square canvas',geometry.cropW===geometry.cropH);
-      expect('composite area gives connected edits room beyond the drawn box',geometry.applyW>geometry.targetW&&geometry.applyH>geometry.targetH);
+      expect('composite area exactly matches the drawn box',geometry.applyX===geometry.targetX&&geometry.applyY===geometry.targetY&&geometry.applyW===geometry.targetW&&geometry.applyH===geometry.targetH);
       const normalizedSource=editFrameSourceRect({naturalWidth:2109,naturalHeight:746},geometry);
       expect('wide editor output is center-cropped instead of regenerated',normalizedSource.width<2109&&normalizedSource.height===746);
       state.regions[1].instruction='';
@@ -505,8 +504,8 @@
       const customPrompt=editPrompt(state.regions[2],cropGeometry(state.regions[2]),2);
       expect('custom instructions are passed into the edit prompt',customPrompt.includes('Perform this requested change: Add a bright red bow inside this area.'));
       expect('edited center pixel is composited',center[0]>180&&center[1]<80);
-      expect('connected edit crossing the drawn box is composited',bleedPixel[0]>180&&bleedPixel[1]<80);
-      expect('pixel outside safe composite area remains unchanged',outside===before);
+      expect('edit outside the drawn box is not composited',bleedPixel.join(',')===bleedBefore);
+      expect('pixel outside the drawn box remains unchanged',outside===before);
       expect('patch is tracked for deterministic recomposition',state.appliedPatches.has(first.id));
       expect('version 3 export preserves region count',parsed.version===3&&parsed.regions.length===10&&parsed.need===10);
       updateRegionList(); fitCanvasSize(); updateControls();
@@ -517,14 +516,12 @@
   function editPrompt(region,geometry,index){
     const left=Math.round(geometry.targetX/geometry.cropW*100),top=Math.round(geometry.targetY/geometry.cropH*100);
     const right=Math.round((geometry.targetX+geometry.targetW)/geometry.cropW*100),bottom=Math.round((geometry.targetY+geometry.targetH)/geometry.cropH*100);
-    const safeLeft=Math.round(geometry.applyX/geometry.cropW*100),safeTop=Math.round(geometry.applyY/geometry.cropH*100);
-    const safeRight=Math.round((geometry.applyX+geometry.applyW)/geometry.cropW*100),safeBottom=Math.round((geometry.applyY+geometry.applyH)/geometry.cropH*100);
     const centerX=Math.round((left+right)/2),centerY=Math.round((top+bottom)/2);
     const instruction=String(region.instruction||'').trim();
     const requested=instruction
       ?`Perform this requested change: ${instruction}`
       :`Choose and perform one clear, playful, natural-looking change to the main visible feature intersecting the target center. ${AUTO_EDIT_VARIANTS[index%AUTO_EDIT_VARIANTS.length]} Make it noticeable at normal full-image viewing size; do not change a person's identity.`;
-    return `TOOL POLICY: Do not call Adobe, Photoshop, Canva, or any other external app, connected app, plugin, or editing tool. Do not open an external editor or ask for tool permission. Perform the image edit directly in this ChatGPT conversation and return the edited image. Edit this square crop for a fun classroom spot-the-difference puzzle. The only editable subject is the feature intersecting the center point at approximately ${centerX}% across and ${centerY}% down, inside the target rectangle from ${left}%–${right}% across and ${top}%–${bottom}% down. Directional words such as left, right, upper, lower, top, or bottom refer to the original full image and must never override the target rectangle in this crop. If similar people or objects appear elsewhere, do not edit them. Keep changes harmless, playful, and visually clear; playful face edits such as changing glasses, adding a silly accessory, or making a gentle expression change are welcome when they preserve identity and remain non-graphic. ${requested} Concentrate the change inside the target. If that same connected feature crosses the target edge, complete the edit naturally across the whole feature, but never extend beyond the safe compositing rectangle from ${safeLeft}%–${safeRight}% across and ${safeTop}%–${safeBottom}% down. Never add, remove, replace, or alter a mustache, and avoid facial-hair jokes. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact square canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe the image. Preserve lighting, texture, color profile, sharpness, and all unrelated details. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited square image only. This is edit ${index+1} of ${state.regions.length}.`;
+    return `TOOL POLICY: Do not call Adobe, Photoshop, Canva, or any other external app, connected app, plugin, or editing tool. Do not open an external editor or ask for tool permission. Perform the image edit directly in this ChatGPT conversation and return the edited image. Edit this square crop for a fun classroom spot-the-difference puzzle. The only editable subject is the feature intersecting the center point at approximately ${centerX}% across and ${centerY}% down, inside the target rectangle from ${left}%–${right}% across and ${top}%–${bottom}% down. Directional words such as left, right, upper, lower, top, or bottom refer to the original full image and must never override the target rectangle in this crop. If similar people or objects appear elsewhere, do not edit them. Keep changes harmless, playful, and visually clear; playful face edits such as changing glasses, adding a silly accessory, or making a gentle expression change are welcome when they preserve identity and remain non-graphic. ${requested} Concentrate the change inside the target and never extend it beyond that target rectangle. Never add, remove, replace, or alter a mustache, and avoid facial-hair jokes. Never move a whole limb, change a person's pose or body position, or reposition the subject. Keep it localized, seamless, believable, and gently amusing when it is a visual joke. A removed human feature must look like a clean, harmless visual oddity with natural uninjured skin—never a wound, gore, distress, or grotesque disfigurement. Preserve the crop's exact square canvas framing and pixel alignment: do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe the image. Preserve lighting, texture, color profile, sharpness, and all unrelated details. Do not add borders, labels, highlights, watermarks, or explanatory text. Return one edited square image only. This is edit ${index+1} of ${state.regions.length}.`;
   }
 
   function startAiWorkflow(){

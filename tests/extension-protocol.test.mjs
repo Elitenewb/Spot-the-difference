@@ -207,12 +207,12 @@ test('creator and adapter include recovery guards for stalled website automation
   assert.ok(creator.includes("do not crop, zoom, pan, translate, rotate, stretch, extend, or reframe"));
   assert.ok(creator.includes('function normalizeEditFrame(image,geometry)'));
   assert.ok(creator.includes('function editFrameSourceRect(image,geometry)'));
-  assert.ok(creator.includes('safe-area compositor below instead of rejecting a visually valid result'));
+  assert.ok(creator.includes('exact-target compositor below instead of rejecting a visually valid result'));
   assert.ok(!creator.includes('EDIT_FRAME_MISMATCH'));
   assert.ok(!creator.includes('EDIT_OFF_TARGET'));
   assert.ok(creator.includes('const side=Math.min(maxSide'));
   assert.ok(creator.includes('cropW:side,cropH:side'));
-  assert.ok(creator.includes('applyW:applyRight-applyX'));
+  assert.ok(creator.includes('const applyX=targetX,applyY=targetY,applyW=targetW,applyH=targetH'));
   assert.ok(creator.includes('function revealBounds(region)'));
   assert.ok(creator.includes('return reveal?{xNorm,yNorm,wNorm,hNorm,reveal}'));
   assert.ok(player.includes('function revealToCss(region)'));
